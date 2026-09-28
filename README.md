@@ -1,56 +1,63 @@
-# Welcome to your Expo app 👋
+# GamePulse
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Short football moments, felt live. A React Native + Expo app where fans post, cheer and share football clips.
 
-## Get started
+## Stack
 
-1. Install dependencies
+- Expo SDK 57, React Native 0.86, Expo Router (routes in `src/app/`)
+- Reanimated 4 + Gesture Handler for the reel feed and cheer animations
+- `react-native-svg` for the pulse-ball brand mark
+- `expo-video` for playback
+- Data: mock data in `src/lib/mock-data.ts` for now. Supabase is next (see the launch board).
 
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Run it
 
 ```bash
-npm run reset-project
+npm install
+npx expo start            # Expo Go / dev server
+npx expo run:android      # development build (needed for the native splash and icons)
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Before pushing:
 
-### Other setup steps
+```bash
+npx tsc --noEmit
+npx expo lint
+```
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+## Project layout
 
-## Learn more
+```
+src/
+  app/                  screens (file-based routes)
+    (tabs)/             Reels, Discover, Create, Alerts, Profile
+    comments/[id].tsx   comments sheet
+  components/
+    brand/              pulse-ball mark, logo, animated splash
+    reels/              feed, player, cheer button, double-tap burst
+    ui/                 text, buttons, avatar, headers
+  constants/theme.ts    colours, fonts, spacing tokens
+  lib/                  api, engagement store, types, mock data
+assets/
+  images/               app icon, adaptive icon layers, splash, favicon
+  expo.icon/            iOS 26 icon (Icon Composer)
+  brand/                logo files for marketing and store listings
+scripts/brand/          brand asset generator
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+## Brand
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+- Colours: Royal Blue `#0E2F76`, Ice White `#F4FEFF`, Powder Blue `#A9C0E0`, Pulse Volt `#C6FF3D` (cheers and anything "pulse").
+- A Cheer is a pulse: the ball gets kicked, pulse rings fire. No hearts.
+- Icons and splash images are generated from the same geometry as the in-app mark (`src/components/brand/geometry.ts`). After changing the mark:
 
-## Join the community
+  ```bash
+  pip install cairosvg pillow shapely
+  python scripts/brand/generate.py
+  ```
 
-Join our community of developers creating universal apps.
+- The native splash `imageWidth` in `app.json` (100) must equal `NATIVE_BALL_DP` in `src/components/brand/animated-splash.tsx`, so the ball doesn't jump when the animated splash takes over.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Release
+
+Built and shipped with EAS (`npx eas-cli@latest build`, `submit`, `update`). The `ios/` and `android/` folders are generated; configure native behaviour in `app.json`.
