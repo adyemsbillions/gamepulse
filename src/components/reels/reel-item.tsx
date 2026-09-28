@@ -1,0 +1,197 @@
+import { Image } from 'expo-image';
+import { router } from 'expo-router';
+import { BadgeCheck, Play } from 'lucide-react-native';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+
+import { BURST_MS, CheerBursts, type Burst } from './cheer-burst';
+import { ReelActions } from './reel-actions';
+import { ReelVideo } from './reel-video';
+
+import { AppText } from '@/components/ui/app-text';
+import { Button } from '@/components/ui/button';
+import { Colors, Spacing } from '@/constants/theme';
+import { CURRENT_USER_ID, getUser } from '@/lib/api';
+import { engagement, useEngagement } from '@/lib/engagement-store';
+import type { Reel } from '@/lib/types';
+
+type Props = {
+  reel: Reel;
+  height: number;
+  active: boolean;
+  /** Mount a player (active Reel and its neighbours). */
+  shouldLoad: boolean;
+  paused: boolean;
+  muted: boolean;
+  onTogglePause: (reelId: string) => void;
+  bottomInset?: number;
+};
+
+export const ReelItem = memo(function ReelItem({
+  reel,
+  height,
+  active,
+  shouldLoad,
+  paused,
+  muted,
+  onTogglePause,
+  bottomInset = 0,
+}: Props) {
+  const creator = getUser(reel.userId)!;
+  const supporting = useEngagement((s) => s.supporting.has(creator.id));
+  const [ready, setReady] = useState(false);
+  const onReady = useCallback(() => setReady(true), []);
+  // Player unmounted (scrolled out of the preload window): show the poster again.
+  if (!shouldLoad && ready) setReady(false);
+
+  // Double-tap Cheers drop a pulse ball where you tapped. Several can be in flight at once.
+  const [bursts, setBursts] = useState<Burst[]>([]);
+  const burstSeq = useRef(0);
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const pending = timers.current;
+    return () => pending.forEach(clearTimeout);
+  }, []);
+
+  const cheer = (x: number, y: number) => {
+    engagement.toggleCheer(reel.id, true);
+    const id = ++burstSeq.current;
+    setBursts((b) => [...b.slice(-3), { id, x, y, tilt: (Math.random() - 0.5) * 18 }]);
+    const t = setTimeout(() => {
+      timers.current.delete(t);
+      setBursts((b) => b.filter((item) => item.id !== id));
+    }, BURST_MS + 50);
+    timers.current.add(t);
+  };
+
+  const doubleTap = Gesture.Tap()
+    .numberOfTaps(2)
+    .runOnJS(true)
+    .onEnd((e) => cheer(e.x, e.y));
+  const singleTap = Gesture.Tap()
+    .runOnJS(true)
+    .onEnd(() => onTogglePause(reel.id));
+  const taps = Gesture.Exclusive(doubleTap, singleTap);
+
+  return (
+    <View style={[styles.container, { height }]}>
+      <Image
+        source={reel.thumbnailUrl}
+        style={[StyleSheet.absoluteFill, ready && styles.hidden]}
+        contentFit="cover"
+        transition={150}
+      />
+      {shouldLoad && (
+        <ReelVideo
+          reel={reel}
+          active={active}
+          playing={active && !paused}
+          muted={muted}
+          onReady={onReady}
+        />
+      )}
+
+      <GestureDetector gesture={taps}>
+        <View style={StyleSheet.absoluteFill} accessibilityLabel="Tap to pause, double tap to cheer" />
+      </GestureDetector>
+
+      <View pointerEvents="none" style={styles.center}>
+        {active && paused && (
+          <View style={styles.playBadge}>
+            <Play size={36} color={Colors.iceWhite} fill={Colors.iceWhite} />
+          </View>
+        )}
+      </View>
+
+      <CheerBursts bursts={bursts} />
+
+      <View pointerEvents="none" style={styles.scrim} />
+
+      <View style={[styles.overlay, { paddingBottom: bottomInset + Spacing.three }]} pointerEvents="box-none">
+        <View style={styles.info} pointerEvents="box-none">
+          <View style={styles.creatorRow}>
+            <Pressable onPress={() => router.push(`/user/${creator.username}`)} style={styles.creatorName}>
+              <AppText variant="bodyBold" color={Colors.iceWhite} style={styles.shadow}>
+                @{creator.username}
+              </AppText>
+              {creator.verified && <BadgeCheck size={16} color={Colors.powderBlue} />}
+            </Pressable>
+            {creator.id !== CURRENT_USER_ID && !supporting && (
+              <Button
+                label="Support"
+                variant="ghost"
+                labelColor={Colors.iceWhite}
+                onPress={() => engagement.toggleSupport(creator.id)}
+                style={styles.supportBtn}
+              />
+            )}
+          </View>
+          <AppText variant="caption" color={Colors.powderBlue} style={styles.shadow}>
+            {creator.countryFlag} {creator.country} · {creator.favoriteClub}
+          </AppText>
+          <AppText variant="body" color={Colors.iceWhite} style={styles.shadow} numberOfLines={3}>
+            {reel.caption}
+          </AppText>
+          <View style={styles.tags}>
+            {reel.hashtags.map((tag) => (
+              <Pressable key={tag} hitSlop={4} onPress={() => router.push(`/hashtag/${tag}`)}>
+                <AppText variant="bodyBold" color={Colors.iceWhite} style={styles.shadow}>
+                  #{tag}
+                </AppText>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+        <ReelActions reel={reel} creator={creator} />
+      </View>
+    </View>
+  );
+});
+
+const styles = StyleSheet.create({
+  container: { width: '100%', backgroundColor: Colors.primaryDeep, overflow: 'hidden' },
+  hidden: { opacity: 0 },
+  center: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
+  playBadge: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: Colors.scrim,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingLeft: 4,
+  },
+  scrim: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '38%',
+    backgroundColor: 'rgba(8, 29, 77, 0.28)',
+  },
+  overlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: Spacing.three,
+    gap: Spacing.three,
+  },
+  info: { flex: 1, gap: Spacing.one },
+  creatorRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  creatorName: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  supportBtn: {
+    paddingVertical: 2,
+    paddingHorizontal: Spacing.three,
+    borderColor: Colors.iceWhite,
+  },
+  tags: { flexDirection: 'row', flexWrap: 'wrap', columnGap: Spacing.two },
+  shadow: {
+    textShadowColor: 'rgba(0,0,0,0.6)',
+    textShadowRadius: 4,
+    textShadowOffset: { width: 0, height: 1 },
+  },
+});

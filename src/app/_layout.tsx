@@ -1,18 +1,59 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
+import {
+  Poppins_400Regular,
+  Poppins_500Medium,
+  Poppins_600SemiBold,
+  Poppins_700Bold,
+  Poppins_800ExtraBold,
+  useFonts,
+} from '@expo-google-fonts/poppins';
+import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useColorScheme } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import { useState } from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
+import { AnimatedSplash } from '@/components/brand/animated-splash';
+import { Colors } from '@/constants/theme';
 
 SplashScreen.preventAutoHideAsync();
+SplashScreen.setOptions({ fade: true, duration: 180 });
 
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+export default function RootLayout() {
+  const [loaded, error] = useFonts({
+    Poppins_400Regular,
+    Poppins_500Medium,
+    Poppins_600SemiBold,
+    Poppins_700Bold,
+    Poppins_800ExtraBold,
+  });
+
+  const [splashDone, setSplashDone] = useState(false);
+
+  if (!loaded && !error) return null;
+
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <AppTabs />
-    </ThemeProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <StatusBar style={splashDone ? 'auto' : 'light'} />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: Colors.background },
+        }}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="feed" options={{ contentStyle: { backgroundColor: Colors.primaryDeep } }} />
+        <Stack.Screen
+          name="comments/[id]"
+          options={{
+            presentation: 'formSheet',
+            sheetAllowedDetents: [0.7, 1],
+            sheetGrabberVisible: true,
+            sheetCornerRadius: 22,
+          }}
+        />
+        <Stack.Screen name="report" options={{ presentation: 'modal' }} />
+      </Stack>
+      {/* Takes over from the native splash (it hides it on first layout), then fades out. */}
+      {!splashDone && <AnimatedSplash onDone={() => setSplashDone(true)} />}
+    </GestureHandlerRootView>
   );
 }
