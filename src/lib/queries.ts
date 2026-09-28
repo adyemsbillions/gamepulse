@@ -1,0 +1,174 @@
+/**
+ * TanStack Query hooks over `data`. Query keys include the signed-in user wherever the answer
+ * depends on who is asking, so signing in or out refetches the right things.
+ */
+import {
+  focusManager,
+  QueryClient,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+} from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
+import { AppState, Platform } from 'react-native';
+
+import { data, type FeedFilter } from './api';
+import type { ReportReason } from './data/source';
+import type { ProfilePatch } from './types';
+import { useSessionUserId } from './session';
+
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { staleTime: 30_000, retry: 2 },
+  },
+});
+
+// Treat "app came to the foreground" as window focus, so stale screens refresh.
+if (Platform.OS !== 'web') {
+  focusManager.setEventListener((setFocused) => {
+    const sub = AppState.addEventListener('change', (s) => setFocused(s === 'active'));
+    return () => sub.remove();
+  });
+}
+
+export const keys = {
+  feed: (filter: FeedFilter) => ['feed', filter.hashtag ?? null, filter.username ?? null] as const,
+  mySupports: (uid: string | null | undefined) => ['my-supports', uid ?? null] as const,
+  usernameAvailable: (name: string) => ['username-available', name] as const,
+  reel: (id: string) => ['reel', id] as const,
+  user: (id: string) => ['user', id] as const,
+  username: (username: string) => ['username', username] as const,
+  me: (uid: string | null | undefined) => ['me', uid ?? null] as const,
+  trending: ['hashtags', 'trending'] as const,
+  hashtag: (name: string) => ['hashtag', name] as const,
+  comments: (reelId: string) => ['comments', reelId] as const,
+  notifications: (uid: string | null | undefined) => ['notifications', uid ?? null] as const,
+  search: (q: string) => ['search', q] as const,
+};
+
+export function useFeed(filter: FeedFilter = {}) {
+  const query = useInfiniteQuery({
+    queryKey: keys.feed(filter),
+    queryFn: ({ pageParam }) => data.feed(filter, pageParam),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor,
+  });
+  const reels = useMemo(() => query.data?.pages.flatMap((p) => p.items) ?? [], [query.data]);
+  return { ...query, reels };
+}
+
+export function useReel(id: string | undefined) {
+  return useQuery({ queryKey: keys.reel(id ?? ''), queryFn: () => data.reel(id!), enabled: !!id });
+}
+
+export function useUser(id: string | undefined) {
+  return useQuery({ queryKey: keys.user(id ?? ''), queryFn: () => data.user(id!), enabled: !!id });
+}
+
+export function useUserByUsername(username: string | undefined) {
+  return useQuery({
+    queryKey: keys.username(username ?? ''),
+    queryFn: () => data.userByUsername(username!),
+    enabled: !!username,
+  });
+}
+
+/** The signed-in user's profile. `data` is null when signed out. */
+export function useMe() {
+  const uid = useSessionUserId();
+  return useQuery({ queryKey: keys.me(uid), queryFn: () => data.me(), enabled: uid !== undefined });
+}
+
+export function useTrendingHashtags() {
+  return useQuery({ queryKey: keys.trending, queryFn: () => data.trendingHashtags() });
+}
+
+export function useHashtag(name: string | undefined) {
+  return useQuery({ queryKey: keys.hashtag(name ?? ''), queryFn: () => data.hashtag(name!), enabled: !!name });
+}
+
+export function useComments(reelId: string | undefined) {
+  return useQuery({
+    queryKey: keys.comments(reelId ?? ''),
+    queryFn: () => data.comments(reelId!),
+    enabled: !!reelId,
+  });
+}
+
+export function useNotifications() {
+  const uid = useSessionUserId();
+  return useQuery({
+    queryKey: keys.notifications(uid),
+    queryFn: () => data.notifications(),
+    enabled: uid !== undefined,
+  });
+}
+
+/** Search as you type, waiting for a 250 ms pause. */
+export function useSearch(raw: string) {
+  const [q, setQ] = useState(raw.trim());
+  useEffect(() => {
+    const t = setTimeout(() => setQ(raw.trim()), 250);
+    return () => clearTimeout(t);
+  }, [raw]);
+  return useQuery({
+    queryKey: keys.search(q),
+    queryFn: () => data.search(q),
+    enabled: q.length > 0,
+    placeholderData: (prev) => prev,
+  });
+}
+
+/** Creator ids the signed-in user supports (empty when signed out). */
+export function useMySupports() {
+  const uid = useSessionUserId();
+  return useQuery({ queryKey: keys.mySupports(uid), queryFn: () => data.mySupports(), enabled: uid !== undefined });
+}
+
+export function useUsernameAvailable(name: string, enabled: boolean) {
+  return useQuery({
+    queryKey: keys.usernameAvailable(name),
+    queryFn: () => data.usernameAvailable(name),
+    enabled,
+    staleTime: 5_000,
+  });
+}
+
+// ---------------------------------------------------------------- writes
+
+export function useAddComment(reelId: string) {
+  return useMutation({
+    mutationFn: (body: string) => data.addComment(reelId, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: keys.comments(reelId) });
+      queryClient.invalidateQueries({ queryKey: keys.reel(reelId) });
+      queryClient.invalidateQueries({ queryKey: ['feed'] });
+    },
+  });
+}
+
+export function useMarkNotificationsRead() {
+  return useMutation({
+    mutationFn: () => data.markNotificationsRead(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+  });
+}
+
+export function useUpdateProfile() {
+  return useMutation({
+    mutationFn: (patch: ProfilePatch) => data.updateProfile(patch),
+    onSuccess: (updated) => {
+      // Update the cached profile right away so screens (and the onboarding gate) see it now.
+      queryClient.setQueriesData({ queryKey: ['me'] }, updated);
+      queryClient.invalidateQueries({ queryKey: ['user'] });
+      queryClient.invalidateQueries({ queryKey: ['username'] });
+      queryClient.invalidateQueries({ queryKey: ['feed'] });
+    },
+  });
+}
+
+export function useReport() {
+  return useMutation({
+    mutationFn: (input: { reelId: string; reason: ReportReason; details?: string }) => data.report(input),
+  });
+}

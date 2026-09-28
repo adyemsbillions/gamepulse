@@ -13,6 +13,7 @@ import {
 
 import { ReelItem } from './reel-item';
 
+import { ErrorView, LoadingView, PulseLoader } from '@/components/ui/states';
 import { AppText } from '@/components/ui/app-text';
 import { Colors, Spacing } from '@/constants/theme';
 import type { Reel } from '@/lib/types';
@@ -27,6 +28,14 @@ type Props = {
   topInset?: number;
   bottomInset?: number;
   emptyMessage?: string;
+  /** First page still loading. */
+  loading?: boolean;
+  /** First page failed; shows a retry. */
+  error?: boolean;
+  onRetry?: () => void;
+  /** Called near the end of the list to load the next page. */
+  onEndReached?: () => void;
+  loadingMore?: boolean;
 };
 
 export function ReelFeed({
@@ -35,6 +44,11 @@ export function ReelFeed({
   topInset = 0,
   bottomInset = 0,
   emptyMessage = 'No Moments here yet.',
+  loading = false,
+  error = false,
+  onRetry,
+  onEndReached,
+  loadingMore = false,
 }: Props) {
   const focused = useIsFocused();
   const [height, setHeight] = useState(0);
@@ -61,6 +75,9 @@ export function ReelFeed({
     (id: string) => setPausedId((current) => (current === id ? null : id)),
     [],
   );
+
+  if (loading) return <LoadingView dark />;
+  if (error && reels.length === 0) return <ErrorView dark onRetry={onRetry} />;
 
   if (reels.length === 0) {
     return (
@@ -104,7 +121,15 @@ export function ReelFeed({
           initialNumToRender={2}
           maxToRenderPerBatch={2}
           removeClippedSubviews={Platform.OS === 'android'}
+          onEndReached={onEndReached}
+          onEndReachedThreshold={2}
         />
+      )}
+
+      {loadingMore && (
+        <View pointerEvents="none" style={[styles.more, { bottom: bottomInset + Spacing.four }]}>
+          <PulseLoader size={22} dark />
+        </View>
       )}
 
       <Pressable
@@ -125,6 +150,7 @@ export function ReelFeed({
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: Colors.primaryDeep },
   empty: { alignItems: 'center', justifyContent: 'center', padding: Spacing.four },
+  more: { position: 'absolute', alignSelf: 'center' },
   mute: {
     position: 'absolute',
     right: Spacing.three,

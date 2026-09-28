@@ -6,21 +6,27 @@ import { ProfileView } from '@/components/profile-view';
 import { AppText } from '@/components/ui/app-text';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { Colors, Spacing } from '@/constants/theme';
-import { getUserByUsername } from '@/lib/api';
+import { LoadingView } from '@/components/ui/states';
+import { useUserByUsername } from '@/lib/queries';
 
 export default function UserScreen() {
   const { username } = useLocalSearchParams<{ username: string }>();
-  const user = getUserByUsername(username);
+  const { data: user, isPending, isError, refetch } = useUserByUsername(username);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {user ? (
+      {isPending ? (
+        <>
+          <ScreenHeader title="Profile" back />
+          <LoadingView />
+        </>
+      ) : user ? (
         <ProfileView user={user} header={<ScreenHeader title={`@${user.username}`} back />} />
       ) : (
         <>
           <ScreenHeader title="Profile" back />
-          <AppText color={Colors.textSecondary} style={styles.missing}>
-            This GameMaker doesn&apos;t exist.
+          <AppText color={Colors.textSecondary} style={styles.missing} onPress={isError ? () => refetch() : undefined}>
+            {isError ? "Couldn't load this profile. Tap to try again." : "This GameMaker doesn't exist."}
           </AppText>
         </>
       )}

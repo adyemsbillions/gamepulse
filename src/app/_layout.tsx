@@ -6,7 +6,10 @@ import {
   Poppins_800ExtraBold,
   useFonts,
 } from '@expo-google-fonts/poppins';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
+
+import { AuthGate } from '@/components/auth-gate';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useState } from 'react';
@@ -14,6 +17,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { AnimatedSplash } from '@/components/brand/animated-splash';
 import { Colors } from '@/constants/theme';
+import { queryClient } from '@/lib/queries';
 
 SplashScreen.preventAutoHideAsync();
 SplashScreen.setOptions({ fade: true, duration: 180 });
@@ -32,6 +36,7 @@ export default function RootLayout() {
   if (!loaded && !error) return null;
 
   return (
+    <QueryClientProvider client={queryClient}>
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style={splashDone ? 'auto' : 'light'} />
       <Stack
@@ -51,9 +56,15 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen name="report" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="sign-in" options={{ presentation: 'fullScreenModal', animation: 'fade_from_bottom' }} />
+        <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
+        <Stack.Screen name="edit-profile" />
+        <Stack.Screen name="auth/callback" options={{ contentStyle: { backgroundColor: Colors.primaryDeep } }} />
       </Stack>
+      <AuthGate />
       {/* Takes over from the native splash (it hides it on first layout), then fades out. */}
       {!splashDone && <AnimatedSplash onDone={() => setSplashDone(true)} />}
     </GestureHandlerRootView>
+    </QueryClientProvider>
   );
 }

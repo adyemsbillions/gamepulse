@@ -1,0 +1,42 @@
+/** Countries offered during profile setup (most GamePulse fans first). */
+export const COUNTRIES: readonly { name: string; flag: string }[] = [
+  { name: 'Nigeria', flag: '🇳🇬' },
+  { name: 'Ghana', flag: '🇬🇭' },
+  { name: 'Cameroon', flag: '🇨🇲' },
+  { name: 'Senegal', flag: '🇸🇳' },
+  { name: "Côte d'Ivoire", flag: '🇨🇮' },
+  { name: 'South Africa', flag: '🇿🇦' },
+  { name: 'Kenya', flag: '🇰🇪' },
+  { name: 'Egypt', flag: '🇪🇬' },
+  { name: 'Morocco', flag: '🇲🇦' },
+  { name: 'England', flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
+  { name: 'Spain', flag: '🇪🇸' },
+  { name: 'France', flag: '🇫🇷' },
+  { name: 'Germany', flag: '🇩🇪' },
+  { name: 'Italy', flag: '🇮🇹' },
+  { name: 'Portugal', flag: '🇵🇹' },
+  { name: 'Brazil', flag: '🇧🇷' },
+  { name: 'Argentina', flag: '🇦🇷' },
+  { name: 'USA', flag: '🇺🇸' },
+];
+
+/** Suggestions for "favourite club"; any club can be typed in. */
+export const CLUB_SUGGESTIONS: readonly string[] = [
+  'Enyimba',
+  'Kano Pillars',
+  'Rangers International',
+  'Shooting Stars',
+  'Rivers United',
+  'Remo Stars',
+  'Arsenal',
+  'Chelsea',
+  'Man United',
+  'Man City',
+  'Liverpool',
+  'Real Madrid',
+  'Barcelona',
+  'PSG',
+  'Bayern Munich',
+  'Juventus',
+  'Al Nassr',
+];

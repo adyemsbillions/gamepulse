@@ -12,8 +12,11 @@ import { ReelVideo } from './reel-video';
 import { AppText } from '@/components/ui/app-text';
 import { Button } from '@/components/ui/button';
 import { Colors, Spacing } from '@/constants/theme';
-import { CURRENT_USER_ID, getUser } from '@/lib/api';
-import { engagement, useEngagement } from '@/lib/engagement-store';
+import { data } from '@/lib/api';
+import { requireSignIn } from '@/lib/auth';
+import { engagement, useCheered, useSupporting } from '@/lib/engagement-store';
+import { useMySupports } from '@/lib/queries';
+import { useSessionUserId } from '@/lib/session';
 import type { Reel } from '@/lib/types';
 
 type Props = {
@@ -28,6 +31,8 @@ type Props = {
   bottomInset?: number;
 };
 
+const viewed = new Set<string>();
+
 export const ReelItem = memo(function ReelItem({
   reel,
   height,
@@ -38,8 +43,21 @@ export const ReelItem = memo(function ReelItem({
   onTogglePause,
   bottomInset = 0,
 }: Props) {
-  const creator = getUser(reel.userId)!;
-  const supporting = useEngagement((s) => s.supporting.has(creator.id));
+  const creator = reel.creator;
+  const myId = useSessionUserId();
+  const serverSupports = useMySupports().data;
+  const supporting = useSupporting(creator.id, serverSupports?.includes(creator.id) ?? false);
+  const cheered = useCheered(reel);
+
+  // Count a view once per reel per app session, after it has been on screen for a moment.
+  useEffect(() => {
+    if (!active || viewed.has(reel.id)) return;
+    const t = setTimeout(() => {
+      viewed.add(reel.id);
+      data.recordView(reel.id).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [active, reel.id]);
   const [ready, setReady] = useState(false);
   const onReady = useCallback(() => setReady(true), []);
   // Player unmounted (scrolled out of the preload window): show the poster again.
@@ -55,7 +73,8 @@ export const ReelItem = memo(function ReelItem({
   }, []);
 
   const cheer = (x: number, y: number) => {
-    engagement.toggleCheer(reel.id, true);
+    if (!requireSignIn()) return;
+    engagement.cheer(reel, cheered, true);
     const id = ++burstSeq.current;
     setBursts((b) => [...b.slice(-3), { id, x, y, tilt: (Math.random() - 0.5) * 18 }]);
     const t = setTimeout(() => {
@@ -117,12 +136,12 @@ export const ReelItem = memo(function ReelItem({
               </AppText>
               {creator.verified && <BadgeCheck size={16} color={Colors.powderBlue} />}
             </Pressable>
-            {creator.id !== CURRENT_USER_ID && !supporting && (
+            {myId !== undefined && creator.id !== myId && !supporting && (
               <Button
                 label="Support"
                 variant="ghost"
                 labelColor={Colors.iceWhite}
-                onPress={() => engagement.toggleSupport(creator.id)}
+                onPress={() => engagement.support(creator.id, supporting)}
                 style={styles.supportBtn}
               />
             )}

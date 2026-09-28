@@ -1,4 +1,4 @@
-import type { AppNotification, Comment, Hashtag, Reel, User } from './types';
+import type { CommentRecord, Hashtag, NotificationRecord, ReelRecord, User } from './types';
 
 /**
  * Placeholder content for the prototype. Videos are public test clips (not football) until
@@ -72,7 +72,7 @@ export const users: User[] = [
   },
 ];
 
-export const reels: Reel[] = [
+export const reels: ReelRecord[] = [
   {
     id: 'r_1',
     userId: 'u_1',
@@ -211,7 +211,7 @@ export const clubs = [
   'Al Nassr',
 ];
 
-export const comments: Comment[] = [
+export const comments: CommentRecord[] = [
   { id: 'c_1', reelId: 'r_1', userId: 'u_2', text: 'This is filthy 🔥🔥', parentId: null, cheers: 342, createdAt: '2026-09-25T18:40:00Z' },
   { id: 'c_2', reelId: 'r_1', userId: 'u_3', text: 'Body shape before the flick is perfect.', parentId: null, cheers: 88, createdAt: '2026-09-25T19:02:00Z' },
   { id: 'c_3', reelId: 'r_1', userId: 'u_4', text: 'As a keeper I felt this one 😭', parentId: null, cheers: 51, createdAt: '2026-09-25T19:30:00Z' },
@@ -219,7 +219,7 @@ export const comments: Comment[] = [
   { id: 'c_5', reelId: 'r_3', userId: 'u_2', text: 'Make a part 2 on pressing traps!', parentId: null, cheers: 19, createdAt: '2026-09-24T21:15:00Z' },
 ];
 
-export const notifications: AppNotification[] = [
+export const notifications: NotificationRecord[] = [
   { id: 'n_1', type: 'new_fan', actorId: 'u_1', reelId: null, text: 'became your Fan', read: false, createdAt: '2026-09-26T08:10:00Z' },
   { id: 'n_2', type: 'cheer', actorId: 'u_2', reelId: 'r_7', text: 'cheered your Moment', read: false, createdAt: '2026-09-26T07:45:00Z' },
   { id: 'n_3', type: 'comment', actorId: 'u_3', reelId: 'r_7', text: 'commented: "Great technique on that strike!"', read: false, createdAt: '2026-09-25T22:30:00Z' },

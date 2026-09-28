@@ -1,72 +1,101 @@
 /**
- * Client-side engagement state (Cheers, Saves, Replays, Supporting, new comments).
- * Optimistic and in-memory for the prototype; later these actions call the backend and this
- * store becomes the optimistic cache in front of it.
+ * Optimistic engagement (GP-014): the screen updates the moment you tap, the write goes to the
+ * backend in the background, and if it fails the tap is undone and you're told.
+ *
+ * Server truth comes with the data (`reel.viewer`, `useMySupports()`); this store only holds the
+ * taps made since, keyed by id. It's cleared whenever the signed-in user changes.
  */
+import { Alert } from 'react-native';
 import { useSyncExternalStore } from 'react';
 
-import { CURRENT_USER_ID } from './api';
-import type { Comment } from './types';
+import { data } from './api';
+import { requireSignIn } from './auth';
+import { UserFacingError } from './data/source';
+import type { Reel } from './types';
 
-type State = {
-  cheered: ReadonlySet<string>;
-  saved: ReadonlySet<string>;
-  replayed: ReadonlySet<string>;
-  supporting: ReadonlySet<string>;
-  newComments: readonly Comment[];
-};
+type Overrides = ReadonlyMap<string, boolean>;
+type State = { cheered: Overrides; saved: Overrides; replayed: Overrides; supporting: Overrides };
+type Kind = keyof State;
 
-let state: State = {
-  cheered: new Set(),
-  saved: new Set(),
-  replayed: new Set(),
-  supporting: new Set(['u_2']),
-  newComments: [],
-};
-
+const empty = (): State => ({ cheered: new Map(), saved: new Map(), replayed: new Map(), supporting: new Map() });
+let state: State = empty();
 const listeners = new Set<() => void>();
 
-function setState(next: Partial<State>) {
-  state = { ...state, ...next };
+function set(kind: Kind, id: string, value: boolean | undefined) {
+  const next = new Map(state[kind]);
+  if (value === undefined) next.delete(id);
+  else next.set(id, value);
+  state = { ...state, [kind]: next };
   listeners.forEach((l) => l());
 }
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
-export function useEngagement<T>(selector: (s: State) => T): T {
-  return useSyncExternalStore(subscribe, () => selector(state), () => selector(state));
+function useOverride(kind: Kind, id: string): boolean | undefined {
+  return useSyncExternalStore(subscribe, () => state[kind].get(id), () => state[kind].get(id));
 }
 
-function toggle(set: ReadonlySet<string>, id: string, force?: boolean) {
-  const next = new Set(set);
-  const on = force ?? !next.has(id);
-  if (on) next.add(id);
-  else next.delete(id);
-  return next;
+export function useCheered(reel: Reel) {
+  return useOverride('cheered', reel.id) ?? reel.viewer.cheered;
+}
+export function useSaved(reel: Reel) {
+  return useOverride('saved', reel.id) ?? reel.viewer.saved;
+}
+export function useReplayed(reel: Reel) {
+  return useOverride('replayed', reel.id) ?? reel.viewer.replayed;
+}
+/** `serverValue`: whether the backend says you support them (from useMySupports). */
+export function useSupporting(userId: string, serverValue: boolean) {
+  return useOverride('supporting', userId) ?? serverValue;
+}
+
+/** Counts shown next to an action: the server count, adjusted for taps not yet reflected in it. */
+export function adjustCount(serverCount: number, serverOn: boolean, nowOn: boolean) {
+  return Math.max(0, serverCount - (serverOn ? 1 : 0) + (nowOn ? 1 : 0));
+}
+
+async function optimistic(kind: Kind, id: string, next: boolean, prev: boolean, write: () => Promise<void>) {
+  if (!requireSignIn()) return;
+  if (next === prev) return;
+  set(kind, id, next);
+  try {
+    await write();
+  } catch (e) {
+    set(kind, id, prev);
+    Alert.alert(
+      "That didn't go through",
+      e instanceof UserFacingError ? e.message : 'Check your connection and try again.',
+    );
+  }
 }
 
 export const engagement = {
-  toggleCheer: (reelId: string, force?: boolean) =>
-    setState({ cheered: toggle(state.cheered, reelId, force) }),
-  toggleSave: (reelId: string) => setState({ saved: toggle(state.saved, reelId) }),
-  toggleReplay: (reelId: string) => setState({ replayed: toggle(state.replayed, reelId) }),
-  toggleSupport: (userId: string) => setState({ supporting: toggle(state.supporting, userId) }),
-  addComment: (reelId: string, text: string) =>
-    setState({
-      newComments: [
-        ...state.newComments,
-        {
-          id: `local_${Date.now()}`,
-          reelId,
-          userId: CURRENT_USER_ID,
-          text,
-          parentId: null,
-          cheers: 0,
-          createdAt: new Date().toISOString(),
-        },
-      ],
-    }),
+  cheer: (reel: Reel, current: boolean, force?: boolean) => {
+    const next = force ?? !current;
+    return optimistic('cheered', reel.id, next, current, () => data.setCheer(reel.id, next));
+  },
+  save: (reel: Reel, current: boolean) =>
+    optimistic('saved', reel.id, !current, current, () => data.setSave(reel.id, !current)),
+  replay: (reel: Reel, current: boolean) =>
+    optimistic('replayed', reel.id, !current, current, () => data.setReplay(reel.id, !current)),
+  support: (userId: string, current: boolean) =>
+    optimistic('supporting', userId, !current, current, () => data.setSupport(userId, !current)),
+
+  /** Forget local taps (on sign-in/out, after the data they covered has been refetched). */
+  reset: () => {
+    state = empty();
+    listeners.forEach((l) => l());
+  },
+
+  /** Supporting overrides, for the Supporting feed filter. */
+  supportingOverrides: () => state.supporting,
 };
+
+export function useSupportingOverrides() {
+  return useSyncExternalStore(subscribe, () => state.supporting, () => state.supporting);
+}

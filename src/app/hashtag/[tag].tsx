@@ -7,31 +7,39 @@ import { ReelGrid } from '@/components/reel-grid';
 import { AppText } from '@/components/ui/app-text';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { Colors, Radius, Spacing } from '@/constants/theme';
-import { getFeed, getHashtag } from '@/lib/api';
+import { PulseLoader } from '@/components/ui/states';
+import { normalizeHashtag } from '@/lib/api';
+import { useFeed, useHashtag } from '@/lib/queries';
 import { formatCount } from '@/lib/format';
 
 export default function HashtagScreen() {
   const { tag } = useLocalSearchParams<{ tag: string }>();
-  const hashtag = getHashtag(tag);
-  const reels = getFeed({ hashtag: hashtag.name });
+  const name = normalizeHashtag(tag ?? '');
+  const { data: hashtag } = useHashtag(name);
+  const feed = useFeed({ hashtag: name });
+  const reels = feed.reels;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ScreenHeader title={`#${hashtag.name}`} back />
+      <ScreenHeader title={`#${name}`} back />
       <ScrollView>
         <View style={styles.hero}>
           <View style={styles.icon}>
             <Hash size={34} color={Colors.iceWhite} />
           </View>
           <View style={{ flex: 1 }}>
-            <AppText variant="title">#{hashtag.name}</AppText>
+            <AppText variant="title">#{name}</AppText>
             <AppText variant="caption" color={Colors.textSecondary}>
-              {formatCount(hashtag.usageCount)} Moments
+              {formatCount(hashtag?.usageCount ?? 0)} Moments
             </AppText>
           </View>
         </View>
-        {reels.length > 0 ? (
-          <ReelGrid reels={reels} filter={{ hashtag: hashtag.name }} />
+        {feed.isPending ? (
+          <View style={styles.loading}>
+            <PulseLoader />
+          </View>
+        ) : reels.length > 0 ? (
+          <ReelGrid reels={reels} filter={{ hashtag: name }} />
         ) : (
           <AppText color={Colors.textSecondary} style={styles.empty}>
             No Moments with this hashtag yet.
@@ -54,4 +62,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   empty: { textAlign: 'center', padding: Spacing.five },
+  loading: { alignItems: 'center', padding: Spacing.five },
 });

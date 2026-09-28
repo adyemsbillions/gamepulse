@@ -17,6 +17,7 @@ import { AppText } from '@/components/ui/app-text';
 import { Colors } from '@/constants/theme';
 import { engagement } from '@/lib/engagement-store';
 import { formatCount } from '@/lib/format';
+import type { Reel } from '@/lib/types';
 
 const SIZE = 34;
 
@@ -33,7 +34,7 @@ function ringFrame(t: number) {
  * Cheer = a pulse. The ball gets kicked (squash → pop → spin → bounce), two pulse rings fire off
  * it and a +1 floats up. Also plays when a Cheer arrives from a double-tap on the video.
  */
-export function CheerButton({ reelId, active, count }: { reelId: string; active: boolean; count: number }) {
+export function CheerButton({ reel, active, count }: { reel: Reel; active: boolean; count: number }) {
   const reduceMotion = useReducedMotion();
   const wasActive = useRef(active);
 
@@ -96,7 +97,7 @@ export function CheerButton({ reelId, active, count }: { reelId: string; active:
       accessibilityLabel={active ? 'Remove cheer' : 'Cheer'}
       accessibilityState={{ selected: active }}
       hitSlop={8}
-      onPress={() => engagement.toggleCheer(reelId)}
+      onPress={() => engagement.cheer(reel, active)}
       style={styles.action}>
       <View style={styles.stage}>
         <Animated.View pointerEvents="none" style={[styles.ring, ringAStyle]} />

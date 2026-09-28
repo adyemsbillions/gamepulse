@@ -8,8 +8,8 @@ import { LogoMark } from '@/components/brand/logo';
 import { ReelFeed } from '@/components/reels/reel-feed';
 import { AppText } from '@/components/ui/app-text';
 import { Colors, Fonts, Spacing } from '@/constants/theme';
-import { getFeed } from '@/lib/api';
-import { useEngagement } from '@/lib/engagement-store';
+import { useSupportingOverrides } from '@/lib/engagement-store';
+import { useFeed, useMySupports } from '@/lib/queries';
 
 type FeedTab = 'hot' | 'supporting';
 
@@ -17,12 +17,19 @@ export default function ReelsHome() {
   const insets = useSafeAreaInsets();
   const focused = useIsFocused();
   const [tab, setTab] = useState<FeedTab>('hot');
-  const supporting = useEngagement((s) => s.supporting);
+  const serverSupports = useMySupports().data;
+  const overrides = useSupportingOverrides();
+  const supporting = useMemo(() => {
+    const set = new Set(serverSupports ?? []);
+    overrides.forEach((on, id) => (on ? set.add(id) : set.delete(id)));
+    return set;
+  }, [serverSupports, overrides]);
 
-  const reels = useMemo(() => {
-    const all = getFeed();
-    return tab === 'hot' ? all : all.filter((r) => supporting.has(r.userId));
-  }, [tab, supporting]);
+  const feed = useFeed();
+  const reels = useMemo(
+    () => (tab === 'hot' ? feed.reels : feed.reels.filter((r) => supporting.has(r.userId))),
+    [tab, supporting, feed.reels],
+  );
 
   return (
     <View style={styles.container}>
@@ -31,7 +38,14 @@ export default function ReelsHome() {
         key={tab}
         reels={reels}
         topInset={insets.top}
-        emptyMessage="Support GameMakers to fill your Supporting feed."
+        emptyMessage={
+          tab === 'hot' ? 'No Moments yet. Be the first to post one.' : 'Support GameMakers to fill your Supporting feed.'
+        }
+        loading={feed.isPending}
+        error={feed.isError}
+        onRetry={() => feed.refetch()}
+        onEndReached={() => feed.hasNextPage && !feed.isFetchingNextPage && feed.fetchNextPage()}
+        loadingMore={feed.isFetchingNextPage}
       />
 
       <View style={[styles.header, { paddingTop: insets.top + Spacing.two }]} pointerEvents="box-none">

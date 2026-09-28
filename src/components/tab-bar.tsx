@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppText } from '@/components/ui/app-text';
 import { Colors, Radius, TabBarHeight } from '@/constants/theme';
-import { getNotifications } from '@/lib/api';
+import { useNotifications } from '@/lib/queries';
 
 const TABS: Record<string, { label: string; icon: LucideIcon }> = {
   index: { label: 'Reels', icon: House },
@@ -22,7 +22,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   const bg = onReels ? Colors.primaryDeep : Colors.surface;
   const idle = onReels ? Colors.powderBlue : Colors.textSecondary;
   const activeColor = onReels ? Colors.iceWhite : Colors.primary;
-  const unread = getNotifications().filter((n) => !n.read).length;
+  const unread = useNotifications().data?.filter((n) => !n.read).length ?? 0;
 
   return (
     <View

@@ -8,12 +8,15 @@ import { ReelGrid } from '@/components/reel-grid';
 import { AppText } from '@/components/ui/app-text';
 import { Avatar } from '@/components/ui/avatar';
 import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
-import { getClubs, getFeed, getTrendingHashtags, search } from '@/lib/api';
+import { PulseLoader } from '@/components/ui/states';
+import { getClubs, type SearchResults as Results } from '@/lib/api';
+import { useFeed, useSearch, useTrendingHashtags } from '@/lib/queries';
 import { formatCount } from '@/lib/format';
 
 export default function DiscoverScreen() {
   const [query, setQuery] = useState('');
-  const results = query.trim() ? search(query) : null;
+  const searching = query.trim().length > 0;
+  const search = useSearch(query);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -37,17 +40,30 @@ export default function DiscoverScreen() {
       </View>
 
       <ScrollView keyboardShouldPersistTaps="handled">
-        {results ? <SearchResults results={results} /> : <DiscoverHome />}
+        {!searching ? (
+          <DiscoverHome />
+        ) : search.data ? (
+          <SearchResults results={search.data} />
+        ) : search.isError ? (
+          <AppText color={Colors.textSecondary} style={styles.empty}>
+            Search isn&apos;t working right now. Try again in a moment.
+          </AppText>
+        ) : (
+          <View style={styles.loading}>
+            <PulseLoader />
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 function DiscoverHome() {
-  const tags = getTrendingHashtags();
+  const tags = useTrendingHashtags().data ?? [];
+  const feed = useFeed();
   return (
     <>
-      <SectionTitle icon={<Flame size={18} color={Colors.hot} />} title="Hot Now" />
+      {tags.length > 0 && <SectionTitle icon={<Flame size={18} color={Colors.hot} />} title="Hot Now" />}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
         {tags.map((t) => (
           <Pressable key={t.name} style={styles.tagChip} onPress={() => router.push(`/hashtag/${t.name}`)}>
@@ -78,12 +94,22 @@ function DiscoverHome() {
       </ScrollView>
 
       <SectionTitle title="Trending Moments" />
-      <ReelGrid reels={getFeed()} />
+      {feed.isPending ? (
+        <View style={styles.loading}>
+          <PulseLoader />
+        </View>
+      ) : feed.reels.length > 0 ? (
+        <ReelGrid reels={feed.reels} />
+      ) : (
+        <AppText color={Colors.textSecondary} style={styles.empty}>
+          {feed.isError ? "Couldn't load Moments." : 'No Moments yet.'}
+        </AppText>
+      )}
     </>
   );
 }
 
-function SearchResults({ results }: { results: ReturnType<typeof search> }) {
+function SearchResults({ results }: { results: Results }) {
   const empty = !results.users.length && !results.hashtags.length && !results.reels.length;
   if (empty) {
     return (
@@ -199,4 +225,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   empty: { textAlign: 'center', padding: Spacing.five },
+  loading: { alignItems: 'center', padding: Spacing.five },
 });

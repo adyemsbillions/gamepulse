@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { BadgeCheck, MapPin, Shield } from 'lucide-react-native';
 import type { ReactNode } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
@@ -6,17 +7,21 @@ import { ReelGrid } from '@/components/reel-grid';
 import { AppText } from '@/components/ui/app-text';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+import { PulseLoader } from '@/components/ui/states';
 import { Colors, Radius, Spacing } from '@/constants/theme';
-import { CURRENT_USER_ID, getFeed } from '@/lib/api';
-import { engagement, useEngagement } from '@/lib/engagement-store';
+import { useFeed, useMySupports } from '@/lib/queries';
+import { useSessionUserId } from '@/lib/session';
+import { adjustCount, engagement, useSupporting } from '@/lib/engagement-store';
 import { formatCount } from '@/lib/format';
 import type { User } from '@/lib/types';
 
 export function ProfileView({ user, header }: { user: User; header?: ReactNode }) {
-  const isMe = user.id === CURRENT_USER_ID;
-  const supporting = useEngagement((s) => s.supporting.has(user.id));
-  const reels = getFeed({ username: user.username });
-  const fans = user.fans + (supporting ? 1 : 0);
+  const isMe = user.id === useSessionUserId();
+  const serverSupporting = useMySupports().data?.includes(user.id) ?? false;
+  const supporting = useSupporting(user.id, serverSupporting);
+  const feed = useFeed({ username: user.username });
+  const reels = feed.reels;
+  const fans = adjustCount(user.fans, serverSupporting, supporting);
 
   return (
     <ScrollView style={styles.container}>
@@ -37,7 +42,7 @@ export function ProfileView({ user, header }: { user: User; header?: ReactNode }
         </View>
 
         <View style={styles.stats}>
-          <Stat value={reels.length} label="Moments" />
+          <Stat value={reels.length} more={feed.hasNextPage} label="Moments" />
           <View style={styles.divider} />
           <Stat value={fans} label="Fans" />
           <View style={styles.divider} />
@@ -45,12 +50,12 @@ export function ProfileView({ user, header }: { user: User; header?: ReactNode }
         </View>
 
         {isMe ? (
-          <Button label="Edit profile" variant="secondary" style={styles.cta} />
+          <Button label="Edit profile" variant="secondary" onPress={() => router.push('/edit-profile')} style={styles.cta} />
         ) : (
           <Button
             label={supporting ? 'Supporting' : 'Support'}
             variant={supporting ? 'secondary' : 'primary'}
-            onPress={() => engagement.toggleSupport(user.id)}
+            onPress={() => engagement.support(user.id, supporting)}
             style={styles.cta}
           />
         )}
@@ -62,11 +67,26 @@ export function ProfileView({ user, header }: { user: User; header?: ReactNode }
         )}
       </View>
 
-      {reels.length > 0 ? (
-        <ReelGrid reels={reels} filter={{ username: user.username }} />
+      {feed.isPending ? (
+        <View style={styles.loading}>
+          <PulseLoader />
+        </View>
+      ) : reels.length > 0 ? (
+        <>
+          <ReelGrid reels={reels} filter={{ username: user.username }} />
+          {feed.hasNextPage && (
+            <Button
+              label={feed.isFetchingNextPage ? 'Loading…' : 'Show more Moments'}
+              variant="secondary"
+              disabled={feed.isFetchingNextPage}
+              onPress={() => feed.fetchNextPage()}
+              style={styles.more}
+            />
+          )}
+        </>
       ) : (
         <AppText color={Colors.textSecondary} style={styles.empty}>
-          No Moments yet.
+          {feed.isError ? "Couldn't load Moments." : 'No Moments yet.'}
         </AppText>
       )}
     </ScrollView>
@@ -84,10 +104,13 @@ function Chip({ icon, label }: { icon: ReactNode; label: string }) {
   );
 }
 
-function Stat({ value, label }: { value: number; label: string }) {
+function Stat({ value, label, more }: { value: number; label: string; more?: boolean }) {
   return (
     <View style={styles.stat}>
-      <AppText variant="heading">{formatCount(value)}</AppText>
+      <AppText variant="heading">
+        {formatCount(value)}
+        {more ? '+' : ''}
+      </AppText>
       <AppText variant="label" color={Colors.textSecondary}>
         {label}
       </AppText>
@@ -115,4 +138,6 @@ const styles = StyleSheet.create({
   cta: { marginTop: Spacing.three, minWidth: 180 },
   bio: { textAlign: 'center', marginTop: Spacing.three },
   empty: { textAlign: 'center', padding: Spacing.five },
+  loading: { alignItems: 'center', padding: Spacing.five },
+  more: { margin: Spacing.three },
 });

@@ -8,24 +8,31 @@ import { CheerButton } from './cheer-button';
 import { AppText } from '@/components/ui/app-text';
 import { Avatar } from '@/components/ui/avatar';
 import { Colors, Spacing } from '@/constants/theme';
-import { engagement, useEngagement } from '@/lib/engagement-store';
+import { data } from '@/lib/api';
+import { requireSignIn } from '@/lib/auth';
+import { adjustCount, engagement, useCheered, useReplayed, useSaved } from '@/lib/engagement-store';
 import { formatCount } from '@/lib/format';
 import type { Reel, User } from '@/lib/types';
 
 export function ReelActions({ reel, creator }: { reel: Reel; creator: User }) {
-  const cheered = useEngagement((s) => s.cheered.has(reel.id));
-  const saved = useEngagement((s) => s.saved.has(reel.id));
-  const replayed = useEngagement((s) => s.replayed.has(reel.id));
-  const extraComments = useEngagement((s) => s.newComments.filter((c) => c.reelId === reel.id).length);
+  const cheered = useCheered(reel);
+  const saved = useSaved(reel);
+  const replayed = useReplayed(reel);
 
-  const share = () =>
-    Share.share({
+  const share = async () => {
+    const result = await Share.share({
       message: `${reel.caption}\n\nWatch on GamePulse: https://gamepulse.app/reel/${reel.id}`,
     });
+    if (result.action === Share.sharedAction) data.recordShare(reel.id).catch(() => {});
+  };
 
   const more = () =>
     Alert.alert('Moment options', undefined, [
-      { text: 'Report', style: 'destructive', onPress: () => router.push(`/report?reelId=${reel.id}`) },
+      {
+        text: 'Report',
+        style: 'destructive',
+        onPress: () => requireSignIn() && router.push(`/report?reelId=${reel.id}`),
+      },
       { text: 'Not interested' },
       { text: 'Cancel', style: 'cancel' },
     ]);
@@ -39,17 +46,17 @@ export function ReelActions({ reel, creator }: { reel: Reel; creator: User }) {
         <Avatar user={creator} size={46} ring={Colors.iceWhite} />
       </Pressable>
 
-      <CheerButton reelId={reel.id} active={cheered} count={reel.cheers + (cheered ? 1 : 0)} />
+      <CheerButton reel={reel} active={cheered} count={adjustCount(reel.cheers, reel.viewer.cheered, cheered)} />
       <Action
         label="Comments"
-        count={reel.comments + extraComments}
+        count={reel.comments}
         onPress={() => router.push(`/comments/${reel.id}`)}
         icon={<MessageCircle size={30} color={Colors.iceWhite} />}
       />
       <Action
         label="Replay"
-        count={reel.replays + (replayed ? 1 : 0)}
-        onPress={() => engagement.toggleReplay(reel.id)}
+        count={adjustCount(reel.replays, reel.viewer.replayed, replayed)}
+        onPress={() => engagement.replay(reel, replayed)}
         icon={<Repeat2 size={30} color={replayed ? Colors.powderBlue : Colors.iceWhite} />}
       />
       <Action
@@ -60,7 +67,7 @@ export function ReelActions({ reel, creator }: { reel: Reel; creator: User }) {
       />
       <Action
         label="Save"
-        onPress={() => engagement.toggleSave(reel.id)}
+        onPress={() => engagement.save(reel, saved)}
         icon={
           <Bookmark
             size={28}

@@ -1,13 +1,12 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ChevronLeft } from 'lucide-react-native';
-import { useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ReelFeed } from '@/components/reels/reel-feed';
 import { Colors, Spacing } from '@/constants/theme';
-import { getFeed } from '@/lib/api';
+import { useFeed } from '@/lib/queries';
 
 /** Full-screen feed scoped to a hashtag or creator, opened from a grid. */
 export default function ScopedFeed() {
@@ -18,13 +17,24 @@ export default function ScopedFeed() {
     start?: string;
   }>();
 
-  const reels = useMemo(() => getFeed({ hashtag, username }), [hashtag, username]);
+  const feed = useFeed({ hashtag, username });
+  const reels = feed.reels;
   const initialIndex = Math.max(0, reels.findIndex((r) => r.id === start));
 
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
-      <ReelFeed reels={reels} initialIndex={initialIndex} topInset={insets.top} bottomInset={insets.bottom} />
+      <ReelFeed
+        reels={reels}
+        initialIndex={initialIndex}
+        topInset={insets.top}
+        bottomInset={insets.bottom}
+        loading={feed.isPending}
+        error={feed.isError}
+        onRetry={() => feed.refetch()}
+        onEndReached={() => feed.hasNextPage && !feed.isFetchingNextPage && feed.fetchNextPage()}
+        loadingMore={feed.isFetchingNextPage}
+      />
       <Pressable
         accessibilityLabel="Back"
         hitSlop={12}

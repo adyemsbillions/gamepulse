@@ -1,4 +1,7 @@
-/** Domain types — shaped after the plan's core data model so they map onto Supabase tables later. */
+/**
+ * Domain types used by screens. `*Record` types are the stored shape (one table row, ids only);
+ * the un-suffixed types are what screens receive, with the people they reference embedded.
+ */
 
 export type User = {
   id: string;
@@ -11,11 +14,19 @@ export type User = {
   verified: boolean;
   fans: number;
   supporting: number;
+  avatarUrl?: string | null;
+  /** False until the user has picked a username, country and club. */
+  onboarded?: boolean;
 };
+
+/** Profile fields a user can change themselves. */
+export type ProfilePatch = Partial<
+  Pick<User, 'username' | 'displayName' | 'bio' | 'country' | 'countryFlag' | 'favoriteClub' | 'onboarded'>
+>;
 
 export type ReelStatus = 'uploading' | 'processing' | 'ready' | 'published' | 'removed';
 
-export type Reel = {
+export type ReelRecord = {
   id: string;
   userId: string;
   playbackUrl: string;
@@ -32,7 +43,12 @@ export type Reel = {
   createdAt: string;
 };
 
-export type Comment = {
+/** What the signed-in viewer has already done to a reel (all false when signed out). */
+export type ReelViewerState = { cheered: boolean; saved: boolean; replayed: boolean };
+
+export type Reel = ReelRecord & { creator: User; viewer: ReelViewerState };
+
+export type CommentRecord = {
   id: string;
   reelId: string;
   userId: string;
@@ -42,6 +58,8 @@ export type Comment = {
   createdAt: string;
 };
 
+export type Comment = CommentRecord & { author: User };
+
 export type Hashtag = {
   name: string;
   usageCount: number;
@@ -50,7 +68,7 @@ export type Hashtag = {
 
 export type NotificationType = 'cheer' | 'comment' | 'new_fan' | 'mention' | 'replay' | 'system';
 
-export type AppNotification = {
+export type NotificationRecord = {
   id: string;
   type: NotificationType;
   actorId: string | null;
@@ -59,3 +77,8 @@ export type AppNotification = {
   read: boolean;
   createdAt: string;
 };
+
+export type AppNotification = NotificationRecord & { actor: User | null };
+
+/** One page of a paginated list. `nextCursor` is null on the last page. */
+export type Page<T> = { items: T[]; nextCursor: string | null };

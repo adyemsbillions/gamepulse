@@ -8,27 +8,37 @@ import { AppText } from '@/components/ui/app-text';
 import { Button } from '@/components/ui/button';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { Colors, Radius, Spacing } from '@/constants/theme';
+import type { ReportReason } from '@/lib/data/source';
+import { useReport } from '@/lib/queries';
 
-const REASONS = [
-  'Spam or misleading',
-  'Violence or dangerous acts',
-  'Hate speech or harassment',
-  'Nudity or sexual content',
-  'Copyright / broadcast rights',
-  'Scam or fraud',
-  'Something else',
+const REASONS: { label: string; value: ReportReason }[] = [
+  { label: 'Spam or misleading', value: 'spam' },
+  { label: 'Violence or dangerous acts', value: 'violence' },
+  { label: 'Hate speech', value: 'hate' },
+  { label: 'Bullying or harassment', value: 'abuse' },
+  { label: 'Nudity or sexual content', value: 'nudity' },
+  { label: 'Copyright / broadcast rights', value: 'copyright' },
+  { label: 'Scam, fraud or something else', value: 'other' },
 ];
 
-/** Report flow. The backend will persist this to `reports` for the admin moderation queue. */
+/** Report flow (GP-035): saved to `reports` for the moderation queue. */
 export default function ReportScreen() {
   const { reelId } = useLocalSearchParams<{ reelId?: string }>();
-  const [reason, setReason] = useState<string | null>(null);
+  const [reason, setReason] = useState<ReportReason | null>(null);
+  const report = useReport();
 
   const submit = () => {
-    // TODO(backend): insert into reports { reporter_id, object_type: 'video', object_id: reelId, reason }
-    console.log('report', { reelId, reason });
-    Alert.alert('Thanks for reporting', 'Our moderators will review this Moment.');
-    router.back();
+    if (!reelId || !reason) return;
+    report.mutate(
+      { reelId, reason },
+      {
+        onSuccess: () => {
+          Alert.alert('Thanks for reporting', 'Our moderators will review this Moment.');
+          router.back();
+        },
+        onError: () => Alert.alert("Report didn't send", 'Check your connection and try again.'),
+      },
+    );
   };
 
   return (
@@ -39,24 +49,28 @@ export default function ReportScreen() {
           Why are you reporting this? Your report is anonymous.
         </AppText>
         <View style={styles.list}>
-          {REASONS.map((r) => {
-            const selected = r === reason;
+          {REASONS.map(({ label, value }) => {
+            const selected = value === reason;
             return (
               <Pressable
-                key={r}
+                key={value}
                 accessibilityRole="radio"
                 accessibilityState={{ selected }}
-                onPress={() => setReason(r)}
+                onPress={() => setReason(value)}
                 style={[styles.option, selected && styles.optionSelected]}>
                 <AppText variant="bodyBold" color={selected ? Colors.primary : Colors.text}>
-                  {r}
+                  {label}
                 </AppText>
                 {selected && <Check size={20} color={Colors.primary} />}
               </Pressable>
             );
           })}
         </View>
-        <Button label="Submit report" onPress={submit} disabled={!reason} />
+        <Button
+          label={report.isPending ? 'Sending…' : 'Submit report'}
+          onPress={submit}
+          disabled={!reason || report.isPending}
+        />
       </ScrollView>
     </SafeAreaView>
   );
