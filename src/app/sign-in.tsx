@@ -11,6 +11,7 @@ import { AppText } from '@/components/ui/app-text';
 import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
 import { isLive } from '@/lib/api';
 import { signInWithGoogle } from '@/lib/auth';
+import { useSessionUserId } from '@/lib/session';
 
 /** Sign-in sheet. Opened from Profile, Alerts, comments, or any action that needs an account. */
 export default function SignIn() {
@@ -25,13 +26,19 @@ export default function SignIn() {
     [],
   );
 
+  // However sign-in finishes (this sheet, or the return link handled elsewhere), close once signed in.
+  const uid = useSessionUserId();
+  useEffect(() => {
+    if (!uid) return;
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  }, [uid]);
+
   const google = async () => {
     setBusy(true);
     setError(null);
     try {
-      const result = await signInWithGoogle();
-      if (!mounted.current) return;
-      if (result === 'signed-in' && router.canGoBack()) router.back();
+      await signInWithGoogle();
     } catch (e) {
       if (mounted.current) setError(e instanceof Error ? e.message : 'Sign-in failed. Try again.');
     } finally {

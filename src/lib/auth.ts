@@ -8,6 +8,7 @@
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
+import { Platform } from 'react-native';
 
 import { getSessionUserId } from './session';
 import { supabase } from './supabase';
@@ -15,13 +16,18 @@ import { supabase } from './supabase';
 WebBrowser.maybeCompleteAuthSession();
 
 export const AUTH_CALLBACK_PATH = 'auth/callback';
+/** Keep in step with `scheme` in app.json. */
+const APP_SCHEME = 'gamepulse';
 
 export type SignInResult = 'signed-in' | 'cancelled';
 
 export async function signInWithGoogle(): Promise<SignInResult> {
   if (!supabase) throw new Error('Sign-in needs a Supabase project. Add .env.local and rebuild.');
 
-  const redirectTo = Linking.createURL(AUTH_CALLBACK_PATH);
+  // Must exactly match an entry in Supabase → Authentication → URL Configuration → Redirect URLs,
+  // otherwise Supabase falls back to the Site URL. Native builds use the app scheme directly.
+  const redirectTo =
+    Platform.OS === 'web' ? Linking.createURL(AUTH_CALLBACK_PATH) : `${APP_SCHEME}://${AUTH_CALLBACK_PATH}`;
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: { redirectTo, skipBrowserRedirect: true, queryParams: { prompt: 'select_account' } },
@@ -35,9 +41,12 @@ export async function signInWithGoogle(): Promise<SignInResult> {
   return 'signed-in';
 }
 
+/** One exchange per code, however many copies of the return link arrive at once. */
+const exchanges = new Map<string, Promise<void>>();
+
 /**
  * Turn the callback URL into a session. Handles the PKCE code (`?code=`) and, for older links,
- * tokens in the fragment. Safe to call twice with the same URL.
+ * tokens in the fragment. Safe to call any number of times with the same URL.
  */
 export async function completeSignIn(url: string) {
   if (!supabase) return;
@@ -45,21 +54,36 @@ export async function completeSignIn(url: string) {
   if (params.error) throw new Error(params.error_description ?? params.error);
 
   if (params.code) {
-    const { data } = await supabase.auth.getSession();
-    if (data.session) return; // already exchanged (the deep link can arrive twice on Android)
-    const { error } = await supabase.auth.exchangeCodeForSession(params.code);
-    if (error) {
-      // The other copy of the deep link may have exchanged the code first.
-      const again = await supabase.auth.getSession();
-      if (!again.data.session) throw new Error(error.message);
+    let pending = exchanges.get(params.code);
+    if (!pending) {
+      pending = exchangeCode(params.code);
+      exchanges.set(params.code, pending);
     }
-  } else if (params.access_token && params.refresh_token) {
+    return pending;
+  }
+  if (params.access_token && params.refresh_token) {
     const { error } = await supabase.auth.setSession({
       access_token: params.access_token,
       refresh_token: params.refresh_token,
     });
     if (error) throw new Error(error.message);
   }
+}
+
+async function exchangeCode(code: string) {
+  if (!supabase) return;
+  const { data } = await supabase.auth.getSession();
+  if (data.session) return;
+  const { error } = await supabase.auth.exchangeCodeForSession(code);
+  if (error) {
+    const again = await supabase.auth.getSession();
+    if (!again.data.session) throw new Error(error.message);
+  }
+}
+
+/** True for the link Google sign-in returns to (any spelling of gamepulse://auth/callback). */
+export function isAuthCallback(pathOrUrl: string) {
+  return pathOrUrl.includes('auth/callback');
 }
 
 export async function signOut() {
