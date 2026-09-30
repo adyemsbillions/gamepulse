@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Colors } from '@/constants/theme';
+import { videoSource } from '@/lib/media';
 import type { Reel } from '@/lib/types';
 
 type Props = {
@@ -21,7 +22,7 @@ type Props = {
  * neighbours, so the next Reel is buffered while the rest of the feed stays as posters.
  */
 export function ReelVideo({ reel, playing, active, muted, onReady }: Props) {
-  const player = useVideoPlayer({ uri: reel.playbackUrl, useCaching: true }, (p) => {
+  const player = useVideoPlayer(videoSource(reel.playbackUrl), (p) => {
     p.loop = true;
     p.timeUpdateEventInterval = 0.25;
   });

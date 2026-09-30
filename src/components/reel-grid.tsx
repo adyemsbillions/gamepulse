@@ -7,6 +7,7 @@ import { AppText } from '@/components/ui/app-text';
 import { Colors, Spacing } from '@/constants/theme';
 import type { FeedFilter } from '@/lib/api';
 import { formatCount } from '@/lib/format';
+import { imageSource } from '@/lib/media';
 import type { Reel } from '@/lib/types';
 
 const GAP = 2;
@@ -22,7 +23,7 @@ export function ReelGrid({ reels, filter = {} }: { reels: Reel[]; filter?: FeedF
           accessibilityLabel={reel.caption}
           style={[styles.cell, { width: cellWidth }]}
           onPress={() => router.push({ pathname: '/feed', params: { ...filter, start: reel.id } })}>
-          <Image source={reel.thumbnailUrl} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} />
+          <Image source={imageSource(reel.thumbnailUrl)} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} />
           <View style={styles.views}>
             <Play size={12} color={Colors.iceWhite} fill={Colors.iceWhite} />
             <AppText variant="label" color={Colors.iceWhite}>

@@ -16,7 +16,6 @@ import { Colors, Spacing } from '@/constants/theme';
 import { data } from '@/lib/api';
 import { requireSignIn } from '@/lib/auth';
 import { engagement, useCheered, useSupporting } from '@/lib/engagement-store';
-import { imageSource } from '@/lib/media';
 import { useMySupports } from '@/lib/queries';
 import { useSessionUserId } from '@/lib/session';
 import type { Reel } from '@/lib/types';
@@ -98,7 +97,7 @@ export const ReelItem = memo(function ReelItem({
   return (
     <View style={[styles.container, { height }]}>
       <Image
-        source={imageSource(reel.thumbnailUrl)}
+        source={reel.thumbnailUrl}
         style={[StyleSheet.absoluteFill, ready && styles.hidden]}
         contentFit="cover"
         transition={150}
