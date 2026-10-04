@@ -11,6 +11,7 @@ import { useSyncExternalStore } from 'react';
 import { data } from './api';
 import { requireSignIn } from './auth';
 import { UserFacingError } from './data/source';
+import { keys, queryClient } from './queries';
 import type { Reel } from './types';
 
 type Overrides = ReadonlyMap<string, boolean>;
@@ -80,11 +81,17 @@ export const engagement = {
     return optimistic('cheered', reel.id, next, current, () => data.setCheer(reel.id, next));
   },
   save: (reel: Reel, current: boolean) =>
-    optimistic('saved', reel.id, !current, current, () => data.setSave(reel.id, !current)),
+    optimistic('saved', reel.id, !current, current, async () => {
+      await data.setSave(reel.id, !current);
+      queryClient.invalidateQueries({ queryKey: keys.savedFeed });
+    }),
   replay: (reel: Reel, current: boolean) =>
     optimistic('replayed', reel.id, !current, current, () => data.setReplay(reel.id, !current)),
   support: (userId: string, current: boolean) =>
     optimistic('supporting', userId, !current, current, () => data.setSupport(userId, !current)),
+
+  /** Drop a local Support tap, e.g. after a block ended the support on the server. */
+  forgetSupport: (userId: string) => set('supporting', userId, undefined),
 
   /** Forget local taps (on sign-in/out, after the data they covered has been refetched). */
   reset: () => {

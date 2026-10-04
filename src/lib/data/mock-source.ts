@@ -5,10 +5,19 @@
 import * as mock from '../mock-data';
 import type { Comment, Reel, ReelRecord, User } from '../types';
 
-import { FEED_PAGE_SIZE, normalizeHashtag, type DataSource, type FeedFilter } from './source';
+import { FEED_PAGE_SIZE, normalizeHashtag, rankClubs, type DataSource, type FeedFilter } from './source';
+
+const sameClub = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 // Sample-mode engagement lives in memory for the session.
-const mine = { cheers: new Set<string>(), saves: new Set<string>(), replays: new Set<string>(), supports: new Set(['u_2']) };
+const mine = {
+  cheers: new Set<string>(),
+  saves: new Set<string>(),
+  replays: new Set<string>(),
+  supports: new Set(['u_2']),
+  blocked: new Set<string>(),
+  muted: new Set<string>(),
+};
 
 const usersById = new Map(mock.users.map((u) => [u.id, u]));
 const withCreator = (r: ReelRecord): Reel => ({
@@ -25,7 +34,13 @@ function score(r: ReelRecord) {
 }
 
 function filterFeed(filter: FeedFilter): ReelRecord[] {
-  let list = mock.reels.filter((r) => r.status === 'published');
+  let list = mock.reels.filter((r) => r.status === 'published' && !mine.blocked.has(r.userId));
+  if (filter.saved) return list.filter((r) => mine.saves.has(r.id));
+  if (!filter.hashtag && !filter.username && !filter.club) list = list.filter((r) => !mine.muted.has(r.userId));
+  if (filter.club) {
+    const club = filter.club;
+    list = list.filter((r) => sameClub(usersById.get(r.userId)?.favoriteClub ?? '', club));
+  }
   if (filter.hashtag) {
     const tag = normalizeHashtag(filter.hashtag);
     list = list.filter((r) => r.hashtags.includes(tag));
@@ -78,7 +93,7 @@ export const mockSource: DataSource = {
 
   async comments(reelId) {
     return mock.comments
-      .filter((c) => c.reelId === reelId)
+      .filter((c) => c.reelId === reelId && !mine.blocked.has(c.userId))
       .map((c): Comment => ({ ...c, author: usersById.get(c.userId)! }));
   },
 
@@ -91,21 +106,45 @@ export const mockSource: DataSource = {
 
   async search(query) {
     const q = query.trim().toLowerCase().replace(/^[#@]/, '');
-    if (!q) return { users: [], hashtags: [], reels: [] };
+    if (!q) return { users: [], hashtags: [], clubs: [], reels: [] };
     return {
       users: mock.users.filter(
         (u: User) =>
           u.id !== mock.CURRENT_USER_ID && (u.username.includes(q) || u.displayName.toLowerCase().includes(q)),
       ),
       hashtags: mock.hashtags.filter((h) => h.name.includes(q)),
+      clubs: rankClubs(
+        [...mock.users.map((u) => u.favoriteClub), ...mock.clubs].filter((c) => c.toLowerCase().includes(q)),
+      ),
       reels: filterFeed({})
         .filter((r) => r.caption.toLowerCase().includes(q) || r.hashtags.some((h) => h.includes(q)))
         .map(withCreator),
     };
   },
 
+  async clubFans(club) {
+    return mock.users.filter((u) => sameClub(u.favoriteClub, club)).sort((a, b) => b.fans - a.fans);
+  },
+
   async mySupports() {
     return [...mine.supports];
+  },
+
+  async myRelations() {
+    return { blocked: [...mine.blocked], muted: [...mine.muted] };
+  },
+
+  async blockedUsers() {
+    return [...mine.blocked].flatMap((id) => usersById.get(id) ?? []);
+  },
+
+  async setBlock(userId, on) {
+    toggle(mine.blocked, userId, on);
+    if (on) mine.supports.delete(userId);
+  },
+
+  async setMute(userId, on) {
+    toggle(mine.muted, userId, on);
   },
 
   async usernameAvailable(username) {
@@ -157,8 +196,19 @@ export const mockSource: DataSource = {
     return me;
   },
 
+  // Sample mode: the photo stays on this device.
+  async uploadAvatar(image) {
+    const me = usersById.get(mock.CURRENT_USER_ID)!;
+    me.avatarUrl = image.uri;
+    return { ...me };
+  },
+
   async recordView() {},
   async recordShare() {},
+
+  // Sample mode has no server to push from.
+  async registerPushToken() {},
+  async unregisterPushToken() {},
 
   // Sample mode: the "upload" stays on this device and plays the local file.
   async startUpload(input) {

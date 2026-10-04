@@ -1,8 +1,22 @@
-import type { AppNotification, Comment, Hashtag, Page, ProfilePatch, Reel, ReelStatus, User } from '../types';
+import type {
+  AppNotification,
+  Comment,
+  Hashtag,
+  LocalImage,
+  Page,
+  ProfilePatch,
+  Reel,
+  ReelStatus,
+  User,
+} from '../types';
 
-export type FeedFilter = { hashtag?: string; username?: string };
+/**
+ * Which reels a feed shows. `club`: reels by fans of that club. `saved`: the signed-in user's
+ * saved reels, most recently saved first.
+ */
+export type FeedFilter = { hashtag?: string; username?: string; club?: string; saved?: boolean };
 
-export type SearchResults = { users: User[]; hashtags: Hashtag[]; reels: Reel[] };
+export type SearchResults = { users: User[]; hashtags: Hashtag[]; clubs: string[]; reels: Reel[] };
 
 /**
  * Everything the app reads. Two implementations: `mock-source` (bundled sample data, used when
@@ -26,8 +40,14 @@ export interface DataSource {
   comments(reelId: string): Promise<Comment[]>;
   notifications(): Promise<AppNotification[]>;
   search(query: string): Promise<SearchResults>;
+  /** GameMakers whose favourite club is `club`, most Fans first. */
+  clubFans(club: string): Promise<User[]>;
   /** Ids of the creators the signed-in user supports. */
   mySupports(): Promise<string[]>;
+  /** Who the signed-in user has blocked and muted (empty when signed out). */
+  myRelations(): Promise<Relations>;
+  /** Profiles the signed-in user has blocked, most recent first. */
+  blockedUsers(): Promise<User[]>;
   usernameAvailable(username: string): Promise<boolean>;
 
   // ---- writes (all require a signed-in user) ----
@@ -35,12 +55,24 @@ export interface DataSource {
   setSave(reelId: string, on: boolean): Promise<void>;
   setReplay(reelId: string, on: boolean): Promise<void>;
   setSupport(creatorId: string, on: boolean): Promise<void>;
+  /** Block: neither of you sees the other's Moments or comments, and any Support between you ends. */
+  setBlock(userId: string, on: boolean): Promise<void>;
+  /** Mute: their Moments stop showing in your Hot Now feed. Private; they aren't told. */
+  setMute(userId: string, on: boolean): Promise<void>;
   addComment(reelId: string, body: string, parentId?: string | null): Promise<Comment>;
   markNotificationsRead(): Promise<void>;
   report(input: { reelId: string; reason: ReportReason; details?: string }): Promise<void>;
   updateProfile(patch: ProfilePatch): Promise<User>;
+  /** Upload a new profile photo and make it the signed-in user's avatar. */
+  uploadAvatar(image: LocalImage): Promise<User>;
   recordView(reelId: string): Promise<void>;
   recordShare(reelId: string): Promise<void>;
+
+  // ---- push notifications (GP-017)
+  /** Send the signed-in user's notifications to this device. Moves the token over if another account had it. */
+  registerPushToken(token: string, platform: 'android' | 'ios'): Promise<void>;
+  /** Stop sending to this device (on sign-out). */
+  unregisterPushToken(token: string): Promise<void>;
 
   // ---- uploads (GP-019/021/022)
   /** Create a reel for a new video and get where to upload it. */
@@ -71,6 +103,8 @@ export type UploadTicket = {
   } | null;
 };
 
+export type Relations = { blocked: string[]; muted: string[] };
+
 export type ReportReason = 'spam' | 'abuse' | 'violence' | 'nudity' | 'hate' | 'copyright' | 'other';
 
 /** A write the database refused for a reason the user can fix (shown as-is). */
@@ -82,6 +116,26 @@ export const FEED_PAGE_SIZE = 10;
 
 export function normalizeHashtag(tag: string) {
   return tag.replace(/^#/, '').toLowerCase();
+}
+
+/** Same limit as the `avatars` storage bucket. */
+export const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+
+/** Case-insensitive club match; most-used spelling of each club first. */
+export function rankClubs(names: readonly string[], limit = 8): string[] {
+  const byKey = new Map<string, { name: string; count: number }>();
+  for (const raw of names) {
+    const name = raw.trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    const entry = byKey.get(key);
+    if (entry) entry.count += 1;
+    else byKey.set(key, { name, count: 1 });
+  }
+  return [...byKey.values()]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit)
+    .map((e) => e.name);
 }
 
 export const MAX_MOMENT_SECONDS = 60;

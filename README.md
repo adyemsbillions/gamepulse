@@ -129,6 +129,75 @@ Limits (in `supabase/functions/videos/handler.ts`): 60 s, 300 MB, 20 uploads per
 10 hashtags. Bunny's own reported length is checked after encoding, so a longer clip is rejected
 even if a modified app skips the check.
 
+If the library has **Block direct URL file access** on, Bunny refuses requests without a
+`Referer`. Phones send none, so all Bunny media must load through `videoSource()` /
+`imageSource()` in `src/lib/media.ts`, which add one.
+
+## Over-the-air updates (EAS Update)
+
+Changes to JavaScript/TypeScript (screens, logic, styles, images) reach installed apps without a
+new APK. Builds check the `production` channel on launch and when they return to the foreground,
+download quietly, then offer **Restart now**.
+
+```bash
+npx eas-cli@latest update --channel production --environment production --message "What changed"
+```
+
+It bundles on this PC (using `.env.local` for the Supabase keys) and uploads; no build quota used.
+
+A new APK is still needed when **native** code changes: a new package with native code (like
+expo-notifications was), `app.json` plugin/permission changes, or `google-services.json`. When that
+happens, bump `version` in `app.json` (e.g. 1.0.0 → 1.1.0) before building. The runtime version
+follows `version`, so old APKs never receive an update they can't run.
+
+## Block, mute and rate limits
+
+- **Block** (••• on a profile or a Moment): neither person sees the other's Moments or comments,
+  cheers/comments/replays/saves on each other's Moments are refused, any Support between them ends,
+  and no notifications pass between them. Unblock from the profile or Profile → ⚙ → Blocked accounts.
+- **Mute**: hides that person's Moments from your Hot Now feed only. Private.
+- **Rate limits** (`20261003100100_rate_limits.sql`): per account, comments 6/min and 100/hour,
+  cheers 40/min and 600/hour, replays 20/min, supports 20/min and 200/hour, reports 5/min and
+  30/hour. Over the limit the app shows a friendly message. Uploads are capped at 20/day by the
+  videos function; sign-in attempts by Supabase Auth (Dashboard → Authentication → Rate Limits).
+
+## Profile photos
+
+Edit profile → tap the photo. It's cropped square, uploaded to the public `avatars` storage bucket
+under `avatars/<user id>/`, and set as `profiles.avatar_url`; older photos are deleted. Each user
+can only write inside their own folder, 5 MB max (migration `20261001100000_avatars.sql`).
+
+## Push notifications
+
+Every row in `notifications` (cheer, comment, new Fan, mention, replay) is also pushed to the
+recipient's phones: a trigger hands the row's id to the `push` Edge Function, which sends it
+through Expo's push service. A notification is pushed at most once and only within 10 minutes,
+so the function needs no secret. Tapping a push opens the Moment's comments or the person's
+profile. The app asks for permission once a signed-in user has finished profile setup.
+
+One-time setup:
+
+1. Apply migration `20261001100100_push.sql` (or `supabase/manual/apply_2026-10-01.sql`, which also
+   sets the function URL for staging). For another project, point the trigger at its function:
+
+   ```sql
+   insert into private.settings values ('push_function_url', 'https://<project-ref>.supabase.co/functions/v1/push')
+   on conflict (key) do update set value = excluded.value;
+   ```
+
+2. Deploy the function: `npx supabase functions deploy push --no-verify-jwt --use-api`
+3. Firebase (Android): create a project at console.firebase.google.com → add an Android app with
+   package `com.craviifoods.gamepulse` → download `google-services.json` into the project root.
+   `app.config.js` links it automatically when the file is there; rebuild the app afterwards.
+4. Firebase → Project settings → **Service accounts** → **Generate new private key**. Upload it to
+   Expo: `npx eas-cli@latest credentials` → Android → production → **Google Service Account** →
+   *Manage your Google Service Account Key for Push Notifications (FCM V1)* → upload the JSON.
+   Keep that JSON file private; never commit it.
+5. Optional: if you turn on *Enhanced push security* in the EAS dashboard, set
+   `npx supabase secrets set EXPO_ACCESS_TOKEN=<token>`.
+
+Tests: `npx tsx supabase/tests/push_function.test.ts` (no database needed).
+
 ## Brand
 
 - Colours: Royal Blue `#0E2F76`, Ice White `#F4FEFF`, Powder Blue `#A9C0E0`, Pulse Volt `#C6FF3D` (cheers and anything "pulse").

@@ -1,0 +1,16 @@
+{
+  "name": "gamepulse-ad-video",
+  "private": true,
+  "type": "module",
+  "description": "Renders the 30s GamePulse motion-graphics ad (1080x1920, 30fps) + its procedural soundtrack.",
+  "scripts": {
+    "stills": "node render.mjs --still 2.5 5.4 9.4 13.1 16.5 20.3 24.4 29.5",
+    "video": "node render.mjs out/video-silent.mp4",
+    "audio": "node audio.mjs",
+    "mux": "ffmpeg -y -i out/video-silent.mp4 -i out/music.wav -map 0:v -map 1:a -c:v copy -af volume=-0.7dB -c:a aac -b:a 192k -shortest -movflags +faststart out/gamepulse-ad-30s.mp4",
+    "build": "npm run video && npm run audio && npm run mux"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^1.0.9"
+  }
+}

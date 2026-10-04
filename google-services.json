@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "804764256180",
+    "project_id": "gamepulse-22484",
+    "storage_bucket": "gamepulse-22484.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:804764256180:android:a24478c73554d0b76a94e1",
+        "android_client_info": {
+          "package_name": "com.craviifoods.gamepulse"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAFdnpjwjooBvrFVlnAgR5lThrPP1_y4x0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

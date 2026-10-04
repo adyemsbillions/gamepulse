@@ -5,6 +5,7 @@ import { Alert, Pressable, Share, StyleSheet, View } from 'react-native';
 
 import { CheerButton } from './cheer-button';
 
+import { actionSheet } from '@/components/ui/action-sheet';
 import { AppText } from '@/components/ui/app-text';
 import { Avatar } from '@/components/ui/avatar';
 import { Colors, Spacing } from '@/constants/theme';
@@ -15,6 +16,7 @@ import { formatCount } from '@/lib/format';
 import { useDeleteReel } from '@/lib/queries';
 import { useSessionUserId } from '@/lib/session';
 import type { Reel, User } from '@/lib/types';
+import { useSafetyActions } from '@/lib/use-safety-actions';
 
 export function ReelActions({ reel, creator }: { reel: Reel; creator: User }) {
   const cheered = useCheered(reel);
@@ -22,6 +24,7 @@ export function ReelActions({ reel, creator }: { reel: Reel; creator: User }) {
   const replayed = useReplayed(reel);
   const isMine = useSessionUserId() === reel.userId;
   const deleteReel = useDeleteReel();
+  const safety = useSafetyActions(creator);
 
   const share = async () => {
     const result = await Share.share({
@@ -45,19 +48,22 @@ export function ReelActions({ reel, creator }: { reel: Reel; creator: User }) {
 
   const more = () =>
     isMine
-      ? Alert.alert('Your Moment', undefined, [
-          { text: 'Delete Moment', style: 'destructive', onPress: confirmDelete },
-          { text: 'Cancel', style: 'cancel' },
-        ])
-      : Alert.alert('Moment options', undefined, [
-          {
-            text: 'Report',
-            style: 'destructive',
-            onPress: () => requireSignIn() && router.push(`/report?reelId=${reel.id}`),
-          },
-          { text: 'Not interested' },
-          { text: 'Cancel', style: 'cancel' },
-        ]);
+      ? actionSheet.show({
+          title: 'Your Moment',
+          options: [{ label: 'Delete Moment', destructive: true, onPress: confirmDelete }],
+        })
+      : actionSheet.show({
+          title: `@${creator.username}'s Moment`,
+          options: [
+            {
+              label: 'Report',
+              destructive: true,
+              onPress: () => requireSignIn() && router.push(`/report?reelId=${reel.id}`),
+            },
+            ...safety.options,
+            { label: 'Not interested', onPress: () => {} },
+          ],
+        });
 
   return (
     <View style={styles.column}>

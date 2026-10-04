@@ -15,7 +15,19 @@ import type {
   User,
 } from '../types';
 
-import { FEED_PAGE_SIZE, normalizeHashtag, UserFacingError, type DataSource, type UploadTicket } from './source';
+import {
+  FEED_PAGE_SIZE,
+  normalizeHashtag,
+  rankClubs,
+  UserFacingError,
+  type DataSource,
+  type UploadTicket,
+} from './source';
+
+import { CLUB_SUGGESTIONS } from '@/constants/places';
+
+/** Public bucket; each user may only write inside a folder named after their id. */
+const AVATAR_BUCKET = 'avatars';
 
 const PROFILE =
   'id, username, display_name, bio, avatar_url, country, country_flag, favorite_club, verified, onboarded, fans_count, supporting_count';
@@ -149,6 +161,7 @@ const PROFILE_COLUMNS: Record<keyof ProfilePatch, string> = {
   countryFlag: 'country_flag',
   favoriteClub: 'favorite_club',
   onboarded: 'onboarded',
+  avatarUrl: 'avatar_url',
 };
 
 const toHashtag = (h: HashtagRow): Hashtag => ({
@@ -182,12 +195,28 @@ const cleanQuery = (q: string) =>
     .replace(/[^\p{L}\p{N}_. -]/gu, '')
     .slice(0, 50);
 
+/**
+ * A club name as an exact, case-insensitive `ilike` pattern: `%` and `_` escaped, and `*`
+ * (PostgREST's own wildcard) dropped.
+ */
+const clubPattern = (club: string) =>
+  club
+    .trim()
+    .slice(0, 40)
+    .replace(/\*/g, '')
+    .replace(/[\\%_]/g, '\\$&');
+
 type Result<T> = { data: T | null; error: { message: string } | null };
 
 /** Single row or null; throws on a request error. */
 function check<T>(res: Result<T>): T | null {
   if (res.error) throw new Error(res.error.message);
   return res.data;
+}
+
+/** A refused write. Rate limits (SQLSTATE GP429, see rate_limits.sql) carry a message for users. */
+function writeError(error: { code?: string; message: string }) {
+  return error.code === 'GP429' ? new UserFacingError(error.message) : new Error(error.message);
 }
 
 /** List of rows (never null); throws on a request error. */
@@ -220,7 +249,7 @@ export function createSupabaseSource(
   /** Insert a (user, target) row; a duplicate means it's already on, which is fine. */
   const insertEdge = async (table: string, row: Record<string, string>) => {
     const { error } = await client.from(table).insert(row);
-    if (error && error.code !== '23505') throw new Error(error.message);
+    if (error && error.code !== '23505') throw writeError(error);
   };
 
   /** Call the `videos` Edge Function. Its error messages are written for users. */
@@ -239,17 +268,85 @@ export function createSupabaseSource(
     if (error) throw new Error(error.message);
   };
 
+  /** Saved reels page by when they were saved, so the cursor is the save time. */
+  const savedFeed = async (uid: string | null, cursor: string | null) => {
+    if (!uid) return { items: [], nextCursor: null };
+    let q = client.from('saves').select('reel_id, created_at').eq('user_id', uid);
+    if (cursor) q = q.lt('created_at', cursor);
+    const saves = rowsOf(
+      await q
+        .order('created_at', { ascending: false })
+        .limit(FEED_PAGE_SIZE)
+        .overrideTypes<{ reel_id: string; created_at: string }[], { merge: false }>(),
+    );
+    if (saves.length === 0) return { items: [], nextCursor: null };
+
+    const rows = rowsOf(
+      await reelQuery(uid)
+        .in(
+          'id',
+          saves.map((s) => s.reel_id),
+        )
+        .eq('status', 'published')
+        .overrideTypes<ReelRow[], { merge: false }>(),
+    );
+    const byId = new Map(rows.map((r) => [r.id, toReel(r)]));
+    return {
+      // A saved reel that was since removed simply drops out.
+      items: saves.map((s) => byId.get(s.reel_id)).filter((r): r is Reel => !!r),
+      nextCursor: saves.length === FEED_PAGE_SIZE ? saves[saves.length - 1].created_at : null,
+    };
+  };
+
+  const mutedIds = async (uid: string) =>
+    rowsOf(
+      await client
+        .from('mutes')
+        .select('muted_id')
+        .eq('muter_id', uid)
+        .overrideTypes<{ muted_id: string }[], { merge: false }>(),
+    ).map((r) => r.muted_id);
+
+  const updateProfile: DataSource['updateProfile'] = async (patch) => {
+    const uid = await requireUser();
+    const row: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      if (v !== undefined) row[PROFILE_COLUMNS[k as keyof ProfilePatch]] = v;
+    }
+    const { data: updated, error } = await client
+      .from('profiles')
+      .update(row)
+      .eq('id', uid)
+      .select(PROFILE)
+      .single<ProfileRow>();
+    if (error?.code === '23505') throw new UserFacingError('That username is taken. Try another.');
+    if (error?.code === '23514')
+      throw new UserFacingError('Check your details: usernames are 3–24 lowercase letters, numbers, _ or .');
+    if (error) throw new Error(error.message);
+    return toUser(updated);
+  };
+
   return {
     kind: 'supabase',
 
     async feed(filter, cursor) {
+      const uid = await currentUserId();
+      if (filter.saved) return savedFeed(uid, cursor);
+      // The main feed leaves out people you muted. (Blocked people's reels are hidden by the database.)
+      const isMainFeed = !filter.hashtag && !filter.username && !filter.club;
+      // If the mute list can't be read, show the feed unfiltered rather than not at all.
+      const muted = isMainFeed && uid ? await mutedIds(uid).catch(() => []) : [];
+
+      const ownerColumns = [filter.username && 'username', filter.club && 'favorite_club'].filter(Boolean);
       let extra = '';
       if (filter.hashtag) extra += ', tagged:reel_hashtags!inner(tag)';
-      if (filter.username) extra += ', owner:profiles!reels_user_id_fkey!inner(username)';
+      if (ownerColumns.length) extra += `, owner:profiles!reels_user_id_fkey!inner(${ownerColumns.join(', ')})`;
 
-      let q = reelQuery(await currentUserId(), extra).eq('status', 'published');
+      let q = reelQuery(uid, extra).eq('status', 'published');
       if (filter.hashtag) q = q.eq('tagged.tag', normalizeHashtag(filter.hashtag));
       if (filter.username) q = q.eq('owner.username', filter.username);
+      if (filter.club) q = q.ilike('owner.favorite_club', clubPattern(filter.club));
+      if (muted.length) q = q.not('user_id', 'in', `(${muted.join(',')})`);
       if (cursor) q = q.lt('published_at', cursor);
 
       const rows = rowsOf(
@@ -356,11 +453,11 @@ export function createSupabaseSource(
 
     async search(query) {
       const q = cleanQuery(query);
-      if (!q) return { users: [], hashtags: [], reels: [] };
+      if (!q) return { users: [], hashtags: [], clubs: [], reels: [] };
       const like = `%${q}%`;
       const me = await currentUserId();
 
-      const [users, tags, reels] = await Promise.all([
+      const [users, tags, clubs, reels] = await Promise.all([
         client
           .from('profiles')
           .select(PROFILE)
@@ -375,6 +472,13 @@ export function createSupabaseSource(
           .order('usage_count', { ascending: false })
           .limit(20)
           .overrideTypes<HashtagRow[], { merge: false }>(),
+        // Clubs aren't a table yet: they're whatever fans typed as their favourite club.
+        client
+          .from('profiles')
+          .select('favorite_club')
+          .ilike('favorite_club', like)
+          .limit(200)
+          .overrideTypes<{ favorite_club: string }[], { merge: false }>(),
         reelQuery(me)
           .eq('status', 'published')
           .ilike('caption', like)
@@ -388,8 +492,26 @@ export function createSupabaseSource(
           .filter((u) => u.id !== me)
           .map(toUser),
         hashtags: rowsOf(tags).map(toHashtag),
+        clubs: rankClubs([
+          ...rowsOf(clubs).map((c) => c.favorite_club),
+          ...CLUB_SUGGESTIONS.filter((c) => c.toLowerCase().includes(q)),
+        ]),
         reels: rowsOf(reels).map(toReel),
       };
+    },
+
+    async clubFans(club) {
+      const rows = rowsOf(
+        await client
+          .from('profiles')
+          .select(PROFILE)
+          .ilike('favorite_club', clubPattern(club))
+          .eq('onboarded', true)
+          .order('fans_count', { ascending: false })
+          .limit(30)
+          .overrideTypes<ProfileRow[], { merge: false }>(),
+      );
+      return rows.map(toUser);
     },
 
     async mySupports() {
@@ -403,6 +525,34 @@ export function createSupabaseSource(
           .overrideTypes<{ creator_id: string }[], { merge: false }>(),
       );
       return rows.map((r) => r.creator_id);
+    },
+
+    async myRelations() {
+      const uid = await currentUserId();
+      if (!uid) return { blocked: [], muted: [] };
+      const [blocked, muted] = await Promise.all([
+        client
+          .from('blocks')
+          .select('blocked_id')
+          .eq('blocker_id', uid)
+          .overrideTypes<{ blocked_id: string }[], { merge: false }>(),
+        mutedIds(uid),
+      ]);
+      return { blocked: rowsOf(blocked).map((r) => r.blocked_id), muted };
+    },
+
+    async blockedUsers() {
+      const uid = await currentUserId();
+      if (!uid) return [];
+      const rows = rowsOf(
+        await client
+          .from('blocks')
+          .select(`created_at, blocked:profiles!blocks_blocked_id_fkey(${PROFILE})`)
+          .eq('blocker_id', uid)
+          .order('created_at', { ascending: false })
+          .overrideTypes<{ blocked: ProfileRow | null }[], { merge: false }>(),
+      );
+      return rows.flatMap((r) => (r.blocked ? [toUser(r.blocked)] : []));
     },
 
     async usernameAvailable(username) {
@@ -438,6 +588,20 @@ export function createSupabaseSource(
       else await deleteEdge('supports', { creator_id: creatorId, supporter_id: uid });
     },
 
+    async setBlock(userId, on) {
+      const uid = await requireUser();
+      if (userId === uid) throw new UserFacingError("You can't block yourself.");
+      if (on) await insertEdge('blocks', { blocked_id: userId });
+      else await deleteEdge('blocks', { blocker_id: uid, blocked_id: userId });
+    },
+
+    async setMute(userId, on) {
+      const uid = await requireUser();
+      if (userId === uid) throw new UserFacingError("You can't mute yourself.");
+      if (on) await insertEdge('mutes', { muted_id: userId });
+      else await deleteEdge('mutes', { muter_id: uid, muted_id: userId });
+    },
+
     async addComment(reelId, body, parentId = null) {
       await requireUser();
       const text = body.trim();
@@ -447,7 +611,7 @@ export function createSupabaseSource(
         .insert({ reel_id: reelId, body: text, parent_id: parentId })
         .select(COMMENT)
         .single<CommentRow>();
-      if (error) throw new Error(error.message);
+      if (error) throw writeError(error);
       return toComment(row);
     },
 
@@ -460,26 +624,33 @@ export function createSupabaseSource(
     async report({ reelId, reason, details = '' }) {
       await requireUser();
       const { error } = await client.from('reports').insert({ reel_id: reelId, reason, details });
-      if (error) throw new Error(error.message);
+      if (error) throw writeError(error);
     },
 
-    async updateProfile(patch) {
+    updateProfile,
+
+    async uploadAvatar(image) {
       const uid = await requireUser();
-      const row: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(patch)) {
-        if (v !== undefined) row[PROFILE_COLUMNS[k as keyof ProfilePatch]] = v;
+      const bucket = client.storage.from(AVATAR_BUCKET);
+      const ext = image.mimeType === 'image/png' ? 'png' : image.mimeType === 'image/webp' ? 'webp' : 'jpg';
+      // A new name every time, so cached copies of the old photo never show.
+      const path = `${uid}/${Date.now()}.${ext}`;
+      const body = image.file ?? (await (await fetch(image.uri)).arrayBuffer());
+
+      const { error } = await bucket.upload(path, body, { contentType: image.mimeType, cacheControl: '31536000' });
+      if (error) {
+        if (/exceed|too large|size/i.test(error.message)) throw new UserFacingError('That photo is too big (5 MB max).');
+        if (/mime|type/i.test(error.message)) throw new UserFacingError('Use a JPG, PNG or WebP photo.');
+        throw new Error(error.message);
       }
-      const { data: updated, error } = await client
-        .from('profiles')
-        .update(row)
-        .eq('id', uid)
-        .select(PROFILE)
-        .single<ProfileRow>();
-      if (error?.code === '23505') throw new UserFacingError('That username is taken. Try another.');
-      if (error?.code === '23514')
-        throw new UserFacingError('Check your details: usernames are 3–24 lowercase letters, numbers, _ or .');
-      if (error) throw new Error(error.message);
-      return toUser(updated);
+
+      const user = await updateProfile({ avatarUrl: bucket.getPublicUrl(path).data.publicUrl });
+
+      // Tidy up earlier photos. Best effort: a leftover file costs almost nothing.
+      const { data: files } = await bucket.list(uid);
+      const stale = (files ?? []).map((f) => `${uid}/${f.name}`).filter((p) => p !== path);
+      if (stale.length) await bucket.remove(stale).catch(() => {});
+      return user;
     },
 
     async recordView(reelId) {
@@ -488,6 +659,17 @@ export function createSupabaseSource(
 
     async recordShare(reelId) {
       await client.rpc('record_share', { p_reel_id: reelId });
+    },
+
+    async registerPushToken(token, platform) {
+      await requireUser();
+      const { error } = await client.rpc('register_push_token', { p_token: token, p_platform: platform });
+      if (error) throw new Error(error.message);
+    },
+
+    async unregisterPushToken(token) {
+      const { error } = await client.rpc('unregister_push_token', { p_token: token });
+      if (error) throw new Error(error.message);
     },
 
     async startUpload({ caption, tags, durationSec, fileType, fileSize }) {

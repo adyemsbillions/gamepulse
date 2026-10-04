@@ -16,6 +16,8 @@ import { useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { AnimatedSplash } from '@/components/brand/animated-splash';
+import { ActionSheetHost } from '@/components/ui/action-sheet';
+import { UpdatePrompt } from '@/components/update-prompt';
 import { Colors } from '@/constants/theme';
 import { queryClient } from '@/lib/queries';
 
@@ -50,7 +52,9 @@ export default function RootLayout() {
           name="comments/[id]"
           options={{
             presentation: 'formSheet',
-            sheetAllowedDetents: [0.7, 1],
+            // One height only: with several, the screen is laid out at the tallest one, which
+            // pushed the comment box below the bottom edge until the sheet was dragged up.
+            sheetAllowedDetents: [0.85],
             sheetGrabberVisible: true,
             sheetCornerRadius: 22,
           }}
@@ -63,6 +67,8 @@ export default function RootLayout() {
         <Stack.Screen name="auth/callback" options={{ contentStyle: { backgroundColor: Colors.primaryDeep } }} />
       </Stack>
       <AuthGate />
+      <ActionSheetHost />
+      <UpdatePrompt />
       {/* Takes over from the native splash (it hides it on first layout), then fades out. */}
       {!splashDone && <AnimatedSplash onDone={() => setSplashDone(true)} />}
     </GestureHandlerRootView>

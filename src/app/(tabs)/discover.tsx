@@ -80,7 +80,12 @@ function DiscoverHome() {
       <SectionTitle icon={<Shield size={18} color={Colors.primary} />} title="Clubs" />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
         {getClubs().map((club) => (
-          <View key={club} style={styles.club}>
+          <Pressable
+            key={club}
+            accessibilityRole="link"
+            accessibilityLabel={club}
+            onPress={() => openClub(club)}
+            style={styles.club}>
             <View style={styles.clubBadge}>
               <AppText style={styles.clubInitial} color={Colors.iceWhite}>
                 {club[0]}
@@ -89,7 +94,7 @@ function DiscoverHome() {
             <AppText variant="label" numberOfLines={1} style={styles.clubName}>
               {club}
             </AppText>
-          </View>
+          </Pressable>
         ))}
       </ScrollView>
 
@@ -109,12 +114,15 @@ function DiscoverHome() {
   );
 }
 
+const openClub = (club: string) => router.push(`/club/${encodeURIComponent(club)}`);
+
 function SearchResults({ results }: { results: Results }) {
-  const empty = !results.users.length && !results.hashtags.length && !results.reels.length;
+  const empty =
+    !results.users.length && !results.hashtags.length && !results.clubs.length && !results.reels.length;
   if (empty) {
     return (
       <AppText color={Colors.textSecondary} style={styles.empty}>
-        No results. Try another name or #hashtag.
+        No results. Try another name, #hashtag or club.
       </AppText>
     );
   }
@@ -145,6 +153,18 @@ function SearchResults({ results }: { results: Results }) {
               {formatCount(h.usageCount)} Moments
             </AppText>
           </View>
+        </Pressable>
+      ))}
+
+      {results.clubs.length > 0 && <SectionTitle title="Clubs" />}
+      {results.clubs.map((club) => (
+        <Pressable key={club} style={styles.row} onPress={() => openClub(club)}>
+          <View style={styles.hashIcon}>
+            <Shield size={20} color={Colors.primary} />
+          </View>
+          <AppText variant="bodyBold" style={{ flex: 1 }}>
+            {club}
+          </AppText>
         </Pressable>
       ))}
 

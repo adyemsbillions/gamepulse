@@ -8,16 +8,18 @@ import { ReelFeed } from '@/components/reels/reel-feed';
 import { Colors, Spacing } from '@/constants/theme';
 import { useFeed } from '@/lib/queries';
 
-/** Full-screen feed scoped to a hashtag or creator, opened from a grid. */
+/** Full-screen feed scoped to a hashtag, creator, club or your saved Moments, opened from a grid. */
 export default function ScopedFeed() {
   const insets = useSafeAreaInsets();
-  const { hashtag, username, start } = useLocalSearchParams<{
+  const { hashtag, username, club, saved, start } = useLocalSearchParams<{
     hashtag?: string;
     username?: string;
+    club?: string;
+    saved?: string;
     start?: string;
   }>();
 
-  const feed = useFeed({ hashtag, username });
+  const feed = useFeed({ hashtag, username, club, saved: saved === '1' });
   const reels = feed.reels;
   const initialIndex = Math.max(0, reels.findIndex((r) => r.id === start));
 

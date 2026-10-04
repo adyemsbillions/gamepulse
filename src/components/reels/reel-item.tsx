@@ -8,7 +8,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { BURST_MS, CheerBursts, type Burst } from './cheer-burst';
 import { ReelActions } from './reel-actions';
 import { ReelCaption } from './reel-caption';
-import { ReelVideo } from './reel-video';
+import { ReelVideo, SCRUBBER_HEIGHT } from './reel-video';
 
 import { AppText } from '@/components/ui/app-text';
 import { Button } from '@/components/ui/button';
@@ -109,6 +109,7 @@ export const ReelItem = memo(function ReelItem({
           active={active}
           playing={active && !paused}
           muted={muted}
+          bottomInset={bottomInset}
           onReady={onReady}
         />
       )}
@@ -129,7 +130,8 @@ export const ReelItem = memo(function ReelItem({
 
       <View pointerEvents="none" style={styles.scrim} />
 
-      <View style={[styles.overlay, { paddingBottom: bottomInset + Spacing.three }]} pointerEvents="box-none">
+      {/* Clear of the scrubber along the bottom edge, so dragging it never hits a button. */}
+      <View style={[styles.overlay, { paddingBottom: bottomInset + SCRUBBER_HEIGHT }]} pointerEvents="box-none">
         <View style={styles.info} pointerEvents="box-none">
           <View style={styles.creatorRow}>
             <Pressable onPress={() => router.push(`/user/${creator.username}`)} style={styles.creatorName}>

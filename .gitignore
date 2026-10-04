@@ -17,6 +17,9 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
+# Firebase service account private keys (push). google-services.json itself is fine to commit.
+*firebase-adminsdk*.json
+service-account*.json
 
 # Metro
 .metro-health-check*

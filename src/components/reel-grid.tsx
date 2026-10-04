@@ -22,7 +22,18 @@ export function ReelGrid({ reels, filter = {} }: { reels: Reel[]; filter?: FeedF
           key={reel.id}
           accessibilityLabel={reel.caption}
           style={[styles.cell, { width: cellWidth }]}
-          onPress={() => router.push({ pathname: '/feed', params: { ...filter, start: reel.id } })}>
+          onPress={() =>
+            router.push({
+              pathname: '/feed',
+              params: {
+                hashtag: filter.hashtag,
+                username: filter.username,
+                club: filter.club,
+                saved: filter.saved ? '1' : undefined,
+                start: reel.id,
+              },
+            })
+          }>
           <Image source={imageSource(reel.thumbnailUrl)} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} />
           <View style={styles.views}>
             <Play size={12} color={Colors.iceWhite} fill={Colors.iceWhite} />

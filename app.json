@@ -42,8 +42,27 @@
           "cameraPermission": "GamePulse needs the camera so you can record football Moments.",
           "microphonePermission": "GamePulse needs the microphone so your Moments have sound."
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/android-icon-monochrome.png",
+          "color": "#0E2F76",
+          "defaultChannel": "default"
+        }
       ]
     ],
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/b72f511c-ba82-4815-a58a-b490cd555d90",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0,
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      }
+    },
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true

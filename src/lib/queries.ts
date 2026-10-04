@@ -14,7 +14,7 @@ import { AppState, Platform } from 'react-native';
 
 import { data, type FeedFilter } from './api';
 import type { ReportReason } from './data/source';
-import type { ProfilePatch } from './types';
+import type { LocalImage, ProfilePatch, User } from './types';
 import { useSessionUserId } from './session';
 
 export const queryClient = new QueryClient({
@@ -32,8 +32,15 @@ if (Platform.OS !== 'web') {
 }
 
 export const keys = {
-  feed: (filter: FeedFilter) => ['feed', filter.hashtag ?? null, filter.username ?? null] as const,
+  feed: (filter: FeedFilter, uid: string | null | undefined) =>
+    filter.saved
+      ? (['feed', 'saved', uid ?? null] as const)
+      : (['feed', 'public', filter.hashtag ?? null, filter.username ?? null, filter.club?.toLowerCase() ?? null] as const),
+  savedFeed: ['feed', 'saved'] as const,
+  clubFans: (club: string) => ['club-fans', club.toLowerCase()] as const,
   mySupports: (uid: string | null | undefined) => ['my-supports', uid ?? null] as const,
+  relations: (uid: string | null | undefined) => ['relations', uid ?? null] as const,
+  blockedUsers: (uid: string | null | undefined) => ['blocked-users', uid ?? null] as const,
   usernameAvailable: (name: string) => ['username-available', name] as const,
   reel: (id: string) => ['reel', id] as const,
   user: (id: string) => ['user', id] as const,
@@ -46,12 +53,15 @@ export const keys = {
   search: (q: string) => ['search', q] as const,
 };
 
-export function useFeed(filter: FeedFilter = {}) {
+export function useFeed(filter: FeedFilter = {}, { enabled = true }: { enabled?: boolean } = {}) {
+  const uid = useSessionUserId();
   const query = useInfiniteQuery({
-    queryKey: keys.feed(filter),
+    queryKey: keys.feed(filter, uid),
     queryFn: ({ pageParam }) => data.feed(filter, pageParam),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextCursor,
+    // Saved reels belong to whoever is signed in; wait until we know who that is.
+    enabled: enabled && (!filter.saved || uid !== undefined),
   });
   const reels = useMemo(() => query.data?.pages.flatMap((p) => p.items) ?? [], [query.data]);
   return { ...query, reels };
@@ -119,10 +129,29 @@ export function useSearch(raw: string) {
   });
 }
 
+export function useClubFans(club: string | undefined) {
+  return useQuery({
+    queryKey: keys.clubFans(club ?? ''),
+    queryFn: () => data.clubFans(club!),
+    enabled: !!club,
+  });
+}
+
 /** Creator ids the signed-in user supports (empty when signed out). */
 export function useMySupports() {
   const uid = useSessionUserId();
   return useQuery({ queryKey: keys.mySupports(uid), queryFn: () => data.mySupports(), enabled: uid !== undefined });
+}
+
+/** Who the signed-in user blocked and muted. */
+export function useMyRelations() {
+  const uid = useSessionUserId();
+  return useQuery({ queryKey: keys.relations(uid), queryFn: () => data.myRelations(), enabled: uid !== undefined });
+}
+
+export function useBlockedUsers() {
+  const uid = useSessionUserId();
+  return useQuery({ queryKey: keys.blockedUsers(uid), queryFn: () => data.blockedUsers(), enabled: !!uid });
 }
 
 export function useUsernameAvailable(name: string, enabled: boolean) {
@@ -154,16 +183,27 @@ export function useMarkNotificationsRead() {
   });
 }
 
+/** After the signed-in user's profile changes: show it now, refetch everything that embeds it. */
+function profileChanged(updated: User) {
+  // Update the cached profile right away so screens (and the onboarding gate) see it now.
+  queryClient.setQueriesData({ queryKey: ['me'] }, updated);
+  queryClient.invalidateQueries({ queryKey: ['user'] });
+  queryClient.invalidateQueries({ queryKey: ['username'] });
+  queryClient.invalidateQueries({ queryKey: ['club-fans'] });
+  queryClient.invalidateQueries({ queryKey: ['feed'] });
+}
+
 export function useUpdateProfile() {
   return useMutation({
     mutationFn: (patch: ProfilePatch) => data.updateProfile(patch),
-    onSuccess: (updated) => {
-      // Update the cached profile right away so screens (and the onboarding gate) see it now.
-      queryClient.setQueriesData({ queryKey: ['me'] }, updated);
-      queryClient.invalidateQueries({ queryKey: ['user'] });
-      queryClient.invalidateQueries({ queryKey: ['username'] });
-      queryClient.invalidateQueries({ queryKey: ['feed'] });
-    },
+    onSuccess: profileChanged,
+  });
+}
+
+export function useUploadAvatar() {
+  return useMutation({
+    mutationFn: (image: LocalImage) => data.uploadAvatar(image),
+    onSuccess: profileChanged,
   });
 }
 
@@ -175,6 +215,34 @@ export function useDeleteReel() {
       queryClient.invalidateQueries({ queryKey: ['feed'] });
       queryClient.invalidateQueries({ queryKey: ['hashtags'] });
     },
+  });
+}
+
+/** After a block or mute: what you can see changes almost everywhere. */
+function relationsChanged() {
+  queryClient.invalidateQueries({ queryKey: ['relations'] });
+  queryClient.invalidateQueries({ queryKey: ['blocked-users'] });
+  queryClient.invalidateQueries({ queryKey: ['feed'] });
+  queryClient.invalidateQueries({ queryKey: ['reel'] });
+  queryClient.invalidateQueries({ queryKey: ['comments'] });
+  queryClient.invalidateQueries({ queryKey: ['search'] });
+  queryClient.invalidateQueries({ queryKey: ['my-supports'] });
+  queryClient.invalidateQueries({ queryKey: ['user'] });
+  queryClient.invalidateQueries({ queryKey: ['username'] });
+  queryClient.invalidateQueries({ queryKey: ['me'] });
+}
+
+export function useSetBlock() {
+  return useMutation({
+    mutationFn: ({ userId, on }: { userId: string; on: boolean }) => data.setBlock(userId, on),
+    onSuccess: relationsChanged,
+  });
+}
+
+export function useSetMute() {
+  return useMutation({
+    mutationFn: ({ userId, on }: { userId: string; on: boolean }) => data.setMute(userId, on),
+    onSuccess: relationsChanged,
   });
 }
 

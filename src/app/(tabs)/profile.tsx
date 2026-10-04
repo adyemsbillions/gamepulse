@@ -1,9 +1,10 @@
 import { router } from 'expo-router';
 import { Settings } from 'lucide-react-native';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ProfileView } from '@/components/profile-view';
+import { actionSheet } from '@/components/ui/action-sheet';
 import { AppText } from '@/components/ui/app-text';
 import { Button } from '@/components/ui/button';
 import { ScreenHeader } from '@/components/ui/screen-header';
@@ -56,13 +57,14 @@ export default function MyProfile() {
 }
 
 function accountMenu() {
-  Alert.alert('Account', undefined, [
-    { text: 'Edit profile', onPress: () => router.push('/edit-profile') },
-    ...(isLive
-      ? [{ text: 'Sign out', style: 'destructive' as const, onPress: () => void signOut() }]
-      : []),
-    { text: 'Cancel', style: 'cancel' as const },
-  ]);
+  actionSheet.show({
+    title: 'Account',
+    options: [
+      { label: 'Edit profile', onPress: () => router.push('/edit-profile') },
+      { label: 'Blocked accounts', onPress: () => router.push('/blocked') },
+      ...(isLive ? [{ label: 'Sign out', destructive: true, onPress: () => void signOut() }] : []),
+    ],
+  });
 }
 
 function SignedOut() {

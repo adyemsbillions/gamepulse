@@ -10,6 +10,7 @@ import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
 
+import { unregisterFromPush } from './push';
 import { getSessionUserId } from './session';
 import { supabase } from './supabase';
 
@@ -87,6 +88,8 @@ export function isAuthCallback(pathOrUrl: string) {
 }
 
 export async function signOut() {
+  // While still signed in: the server only lets you remove your own device.
+  await unregisterFromPush();
   await supabase?.auth.signOut();
 }
 

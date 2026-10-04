@@ -1,4 +1,5 @@
-import { Check, X } from 'lucide-react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { Camera, Check, X } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
@@ -7,9 +8,24 @@ import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { CLUB_SUGGESTIONS, COUNTRIES } from '@/constants/places';
 import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
-import { USERNAME_PATTERN, UserFacingError } from '@/lib/data/source';
-import { useUpdateProfile, useUsernameAvailable } from '@/lib/queries';
-import type { User } from '@/lib/types';
+import { MAX_AVATAR_BYTES, USERNAME_PATTERN, UserFacingError } from '@/lib/data/source';
+import { useUpdateProfile, useUploadAvatar, useUsernameAvailable } from '@/lib/queries';
+import type { LocalImage, User } from '@/lib/types';
+
+/** Square crop from the gallery. Null if cancelled; throws a UserFacingError if it's unusable. */
+async function pickPhoto(): Promise<LocalImage | null> {
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ['images'],
+    allowsEditing: true,
+    aspect: [1, 1],
+    quality: 0.7,
+  });
+  const asset = result.canceled ? null : result.assets[0];
+  if (!asset) return null;
+  const size = asset.fileSize ?? asset.file?.size;
+  if (size && size > MAX_AVATAR_BYTES) throw new UserFacingError('That photo is too big (5 MB max).');
+  return { uri: asset.uri, mimeType: asset.mimeType ?? asset.file?.type ?? 'image/jpeg', file: asset.file };
+}
 
 /** Placeholder usernames given at sign-up; the user must replace them. */
 const isPlaceholder = (username: string) => /^fan_[0-9a-f]{12}$/.test(username);
@@ -30,6 +46,18 @@ export function ProfileForm({ user, submitLabel, onSaved }: Props) {
   const [bio, setBio] = useState(user.bio);
   const [error, setError] = useState<string | null>(null);
   const save = useUpdateProfile();
+  const photo = useUploadAvatar();
+
+  const changePhoto = async () => {
+    setError(null);
+    try {
+      const image = await pickPhoto();
+      if (!image) return;
+      await photo.mutateAsync(image);
+    } catch (e) {
+      setError(e instanceof UserFacingError ? e.message : "Couldn't update your photo. Check your connection and try again.");
+    }
+  };
 
   // Check availability once typing pauses.
   const [checked, setChecked] = useState(username);
@@ -85,10 +113,37 @@ export function ProfileForm({ user, submitLabel, onSaved }: Props) {
   return (
     <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <View style={styles.avatarRow}>
-        <Avatar user={{ ...user, displayName: displayName || user.displayName }} size={72} />
-        <AppText variant="caption" color={Colors.textSecondary} style={styles.avatarNote}>
-          Your photo comes from your Google account.
-        </AppText>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Change profile photo"
+          disabled={photo.isPending}
+          onPress={changePhoto}>
+          <Avatar
+            user={{
+              ...user,
+              displayName: displayName || user.displayName,
+              avatarUrl: photo.data?.avatarUrl ?? user.avatarUrl,
+            }}
+            size={72}
+          />
+          <View style={styles.cameraBadge}>
+            {photo.isPending ? (
+              <ActivityIndicator size="small" color={Colors.iceWhite} />
+            ) : (
+              <Camera size={14} color={Colors.iceWhite} />
+            )}
+          </View>
+        </Pressable>
+        <View style={styles.avatarNote}>
+          <Pressable accessibilityRole="button" disabled={photo.isPending} onPress={changePhoto} hitSlop={8}>
+            <AppText variant="bodyBold" color={Colors.primary}>
+              {photo.isPending ? 'Uploading photo…' : 'Change photo'}
+            </AppText>
+          </Pressable>
+          <AppText variant="caption" color={Colors.textSecondary}>
+            A clear, square photo works best.
+          </AppText>
+        </View>
       </View>
 
       <Field label="Username" hint={usernameHint} hintTone={taken || (!!username && !validFormat) ? 'bad' : validFormat && changed && availability.data ? 'good' : 'plain'}>
@@ -218,7 +273,20 @@ function Field({
 const styles = StyleSheet.create({
   content: { padding: Spacing.three, gap: Spacing.four, paddingBottom: Spacing.six },
   avatarRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
-  avatarNote: { flex: 1 },
+  avatarNote: { flex: 1, gap: 2 },
+  cameraBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: Colors.primary,
+    borderWidth: 2,
+    borderColor: Colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   field: { gap: Spacing.two },
   inputRow: {
     flexDirection: 'row',

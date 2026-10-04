@@ -21,8 +21,19 @@ export type User = {
 
 /** Profile fields a user can change themselves. */
 export type ProfilePatch = Partial<
-  Pick<User, 'username' | 'displayName' | 'bio' | 'country' | 'countryFlag' | 'favoriteClub' | 'onboarded'>
+  Pick<
+    User,
+    'username' | 'displayName' | 'bio' | 'country' | 'countryFlag' | 'favoriteClub' | 'onboarded' | 'avatarUrl'
+  >
 >;
+
+/** A photo picked on the device, ready to upload. */
+export type LocalImage = {
+  uri: string;
+  mimeType: string;
+  /** Web only: the picked File. */
+  file?: Blob;
+};
 
 export type ReelStatus = 'uploading' | 'processing' | 'ready' | 'failed' | 'published' | 'removed';
 

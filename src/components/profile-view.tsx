@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
-import { BadgeCheck, MapPin, Shield } from 'lucide-react-native';
-import type { ReactNode } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { BadgeCheck, Bookmark, Grid3x3, MapPin, Shield } from 'lucide-react-native';
+import { useState, type ReactNode } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ReelGrid } from '@/components/reel-grid';
 import { AppText } from '@/components/ui/app-text';
@@ -13,15 +13,24 @@ import { useFeed, useMySupports } from '@/lib/queries';
 import { useSessionUserId } from '@/lib/session';
 import { adjustCount, engagement, useSupporting } from '@/lib/engagement-store';
 import { formatCount } from '@/lib/format';
+import type { FeedFilter } from '@/lib/api';
 import type { User } from '@/lib/types';
+import { useSafetyActions } from '@/lib/use-safety-actions';
+
+type Tab = 'moments' | 'saved';
 
 export function ProfileView({ user, header }: { user: User; header?: ReactNode }) {
   const isMe = user.id === useSessionUserId();
   const serverSupporting = useMySupports().data?.includes(user.id) ?? false;
   const supporting = useSupporting(user.id, serverSupporting);
-  const feed = useFeed({ username: user.username });
-  const reels = feed.reels;
+  const [tab, setTab] = useState<Tab>('moments');
+  const momentsFilter = { username: user.username };
+  const moments = useFeed(momentsFilter);
+  // Saves are private, so only your own profile has the tab; it loads the first time it's opened.
+  const showSaved = isMe && tab === 'saved';
+  const saved = useFeed({ saved: true }, { enabled: showSaved });
   const fans = adjustCount(user.fans, serverSupporting, supporting);
+  const safety = useSafetyActions(user);
 
   return (
     <ScrollView style={styles.container}>
@@ -38,11 +47,17 @@ export function ProfileView({ user, header }: { user: User; header?: ReactNode }
 
         <View style={styles.chips}>
           <Chip icon={<MapPin size={14} color={Colors.primary} />} label={`${user.countryFlag} ${user.country}`} />
-          <Chip icon={<Shield size={14} color={Colors.primary} />} label={user.favoriteClub} />
+          {!!user.favoriteClub && (
+            <Chip
+              icon={<Shield size={14} color={Colors.primary} />}
+              label={user.favoriteClub}
+              onPress={() => router.push(`/club/${encodeURIComponent(user.favoriteClub)}`)}
+            />
+          )}
         </View>
 
         <View style={styles.stats}>
-          <Stat value={reels.length} more={feed.hasNextPage} label="Moments" />
+          <Stat value={moments.reels.length} more={moments.hasNextPage} label="Moments" />
           <View style={styles.divider} />
           <Stat value={fans} label="Fans" />
           <View style={styles.divider} />
@@ -51,6 +66,19 @@ export function ProfileView({ user, header }: { user: User; header?: ReactNode }
 
         {isMe ? (
           <Button label="Edit profile" variant="secondary" onPress={() => router.push('/edit-profile')} style={styles.cta} />
+        ) : safety.blocked ? (
+          <>
+            <AppText variant="caption" color={Colors.textSecondary} style={styles.blockedNote}>
+              You blocked @{user.username}. You won&apos;t see each other&apos;s Moments or comments.
+            </AppText>
+            <Button
+              label={safety.busy ? 'Unblocking…' : 'Unblock'}
+              variant="secondary"
+              disabled={safety.busy}
+              onPress={safety.unblock}
+              style={styles.cta}
+            />
+          </>
         ) : (
           <Button
             label={supporting ? 'Supporting' : 'Support'}
@@ -67,40 +95,113 @@ export function ProfileView({ user, header }: { user: User; header?: ReactNode }
         )}
       </View>
 
-      {feed.isPending ? (
-        <View style={styles.loading}>
-          <PulseLoader />
+      {isMe && (
+        <View style={styles.tabs} accessibilityRole="tablist">
+          <TabButton
+            label="Moments"
+            icon={Grid3x3}
+            active={tab === 'moments'}
+            onPress={() => setTab('moments')}
+          />
+          <TabButton label="Saved" icon={Bookmark} active={tab === 'saved'} onPress={() => setTab('saved')} />
         </View>
-      ) : reels.length > 0 ? (
-        <>
-          <ReelGrid reels={reels} filter={{ username: user.username }} />
-          {feed.hasNextPage && (
-            <Button
-              label={feed.isFetchingNextPage ? 'Loading…' : 'Show more Moments'}
-              variant="secondary"
-              disabled={feed.isFetchingNextPage}
-              onPress={() => feed.fetchNextPage()}
-              style={styles.more}
-            />
-          )}
-        </>
+      )}
+
+      {showSaved ? (
+        <ReelsSection
+          feed={saved}
+          filter={{ saved: true }}
+          empty="Moments you save show up here. Only you can see them."
+        />
       ) : (
-        <AppText color={Colors.textSecondary} style={styles.empty}>
-          {feed.isError ? "Couldn't load Moments." : 'No Moments yet.'}
-        </AppText>
+        <ReelsSection
+          feed={moments}
+          filter={momentsFilter}
+          empty={safety.blocked ? 'Unblock to see their Moments.' : 'No Moments yet.'}
+        />
       )}
     </ScrollView>
   );
 }
 
-function Chip({ icon, label }: { icon: ReactNode; label: string }) {
+function ReelsSection({
+  feed,
+  filter,
+  empty,
+}: {
+  feed: ReturnType<typeof useFeed>;
+  filter: FeedFilter;
+  empty: string;
+}) {
+  if (feed.isPending) {
+    return (
+      <View style={styles.loading}>
+        <PulseLoader />
+      </View>
+    );
+  }
+  if (feed.reels.length === 0) {
+    return (
+      <AppText color={Colors.textSecondary} style={styles.empty}>
+        {feed.isError ? "Couldn't load Moments." : empty}
+      </AppText>
+    );
+  }
   return (
-    <View style={styles.chip}>
+    <>
+      <ReelGrid reels={feed.reels} filter={filter} />
+      {feed.hasNextPage && (
+        <Button
+          label={feed.isFetchingNextPage ? 'Loading…' : 'Show more Moments'}
+          variant="secondary"
+          disabled={feed.isFetchingNextPage}
+          onPress={() => feed.fetchNextPage()}
+          style={styles.more}
+        />
+      )}
+    </>
+  );
+}
+
+function TabButton({
+  label,
+  icon: Icon,
+  active,
+  onPress,
+}: {
+  label: string;
+  icon: typeof Grid3x3;
+  active: boolean;
+  onPress: () => void;
+}) {
+  const color = active ? Colors.primary : Colors.textSecondary;
+  return (
+    <Pressable
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={[styles.tab, active && styles.tabActive]}>
+      <Icon size={18} color={color} />
+      <AppText variant="bodyBold" color={color}>
+        {label}
+      </AppText>
+    </Pressable>
+  );
+}
+
+function Chip({ icon, label, onPress }: { icon: ReactNode; label: string; onPress?: () => void }) {
+  return (
+    <Pressable
+      accessibilityRole={onPress ? 'link' : undefined}
+      disabled={!onPress}
+      onPress={onPress}
+      style={styles.chip}>
       {icon}
       <AppText variant="label" color={Colors.primary}>
         {label}
       </AppText>
-    </View>
+    </Pressable>
   );
 }
 
@@ -137,6 +238,24 @@ const styles = StyleSheet.create({
   divider: { width: 1, height: 28, backgroundColor: Colors.border },
   cta: { marginTop: Spacing.three, minWidth: 180 },
   bio: { textAlign: 'center', marginTop: Spacing.three },
+  blockedNote: { textAlign: 'center', marginTop: Spacing.three },
+  tabs: {
+    flexDirection: 'row',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    paddingVertical: Spacing.two + 4,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabActive: { borderBottomColor: Colors.primary },
   empty: { textAlign: 'center', padding: Spacing.five },
   loading: { alignItems: 'center', padding: Spacing.five },
   more: { margin: Spacing.three },
