@@ -37,7 +37,7 @@ export function ReelCaption({ caption, hashtags }: { caption: string; hashtags: 
       {extra.length > 0 && (
         <View style={styles.tags}>
           {extra.map((tag) => (
-            <Pressable key={tag} hitSlop={4} onPress={() => router.push(`/hashtag/${tag}`)}>
+            <Pressable key={tag} accessibilityRole="link" hitSlop={4} onPress={() => router.push(`/hashtag/${tag}`)}>
               <AppText variant="bodyBold" color={Colors.iceWhite} style={styles.shadow}>
                 #{tag}
               </AppText>

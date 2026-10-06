@@ -1,15 +1,16 @@
 import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect, useNavigation } from 'expo-router';
-import { Camera, ChevronRight, Clock, Copyright, Film, Smartphone } from 'lucide-react-native';
+import { Camera, ChevronRight, Clock, Copyright, Film, Reply, Smartphone, Trophy, X } from 'lucide-react-native';
 import { useCallback, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ChallengeCard } from '@/components/challenge-card';
 import { AppText } from '@/components/ui/app-text';
 import { Colors, Radius, Spacing, TabBarHeight } from '@/constants/theme';
 import { requireSignIn } from '@/lib/auth';
 import { MAX_MOMENT_SECONDS, MAX_UPLOAD_BYTES } from '@/lib/data/source';
-import { draftVideo, type PickedVideo } from '@/lib/uploads';
+import { draftVideo, useDraftPreset, type PickedVideo } from '@/lib/uploads';
 
 type Source = 'camera' | 'library';
 
@@ -66,6 +67,7 @@ async function pickVideo(source: Source): Promise<PickedVideo | null> {
 
 export default function CreateScreen() {
   const [busy, setBusy] = useState<Source | null>(null);
+  const preset = useDraftPreset();
   const navigation = useNavigation<{ navigate: (tab: string) => void }>();
 
   // After posting, show Profile: the upload banner tracks progress there.
@@ -100,6 +102,20 @@ export default function CreateScreen() {
         <AppText color={Colors.textSecondary}>
           That skill, that save, that last-minute winner. Share it while it&apos;s hot.
         </AppText>
+
+        {preset ? (
+          <View style={styles.preset}>
+            {preset.replyTo ? <Reply size={18} color={Colors.primary} /> : <Trophy size={18} color={Colors.primary} />}
+            <AppText variant="bodyBold" color={Colors.primary} style={styles.presetText}>
+              {preset.label}
+            </AppText>
+            <Pressable accessibilityLabel="Cancel" hitSlop={10} onPress={() => draftVideo.setPreset(null)}>
+              <X size={18} color={Colors.textSecondary} />
+            </Pressable>
+          </View>
+        ) : (
+          <ChallengeCard onCreateTab />
+        )}
 
         <View style={styles.sources}>
           <SourceCard
@@ -188,6 +204,16 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   content: { padding: Spacing.four, gap: Spacing.two, paddingBottom: TabBarHeight + Spacing.six },
   sources: { gap: Spacing.three, marginTop: Spacing.four },
+  preset: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    marginTop: Spacing.three,
+    padding: Spacing.three,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.surfaceMuted,
+  },
+  presetText: { flex: 1 },
   card: {
     flexDirection: 'row',
     alignItems: 'center',

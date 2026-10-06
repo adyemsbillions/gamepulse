@@ -3,6 +3,7 @@ import { BadgeCheck, Bookmark, Grid3x3, MapPin, Shield } from 'lucide-react-nati
 import { useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { PulseCard } from '@/components/pulse-card';
 import { ReelGrid } from '@/components/reel-grid';
 import { AppText } from '@/components/ui/app-text';
 import { Avatar } from '@/components/ui/avatar';
@@ -55,6 +56,8 @@ export function ProfileView({ user, header }: { user: User; header?: ReactNode }
             />
           )}
         </View>
+
+        <PulseCard user={user} isMe={isMe} />
 
         <View style={styles.stats}>
           <Stat value={moments.reels.length} more={moments.hasNextPage} label="Moments" />

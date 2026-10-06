@@ -19,7 +19,7 @@ const BATCH = 100;
 /** Keep in step with PUSH_CHANNEL in src/lib/push.ts. */
 const CHANNEL = 'default';
 
-export type NotificationType = 'cheer' | 'comment' | 'new_fan' | 'mention' | 'replay' | 'system';
+export type NotificationType = 'cheer' | 'comment' | 'new_fan' | 'mention' | 'replay' | 'response' | 'system';
 
 export type ExpoMessage = {
   to: string;
@@ -127,6 +127,7 @@ const ACTIVITY: Record<Exclude<NotificationType, 'system' | 'comment'>, string> 
   new_fan: 'became your Fan',
   mention: 'mentioned you in a comment',
   replay: 'replayed your Moment',
+  response: 'responded to your Moment 🎬',
 };
 
 /** What the push says, and what the app needs to open the right screen when it's tapped. */

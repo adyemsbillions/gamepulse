@@ -17,7 +17,44 @@ export type User = {
   avatarUrl?: string | null;
   /** False until the user has picked a username, country and club. */
   onboarded?: boolean;
+  /** All-time Pulse Points (decides the rank). */
+  pulsePoints?: number;
+  /** Days in a row they've opened GamePulse. */
+  streakDays?: number;
+  /** Weekly challenges won. */
+  challengeWins?: number;
 };
+
+/** A weekly challenge: post a Moment with its hashtag while it runs. */
+export type Challenge = {
+  id: string;
+  tag: string;
+  title: string;
+  description: string;
+  emoji: string;
+  startsAt: string;
+  endsAt: string;
+  entries: number;
+  /** Set once the week is over and the winner has been crowned. */
+  winner: User | null;
+  winnerReelId: string | null;
+  finished: boolean;
+};
+
+/** The reel a Moment responds to (a duet). */
+export type ReplyTarget = { reelId: string; username: string };
+
+/** One row of Top fans this week. */
+export type FanStanding = { user: User; weekPoints: number; position: number };
+
+/** One club in Club Wars this week. */
+export type ClubStanding = { club: string; points: number; fans: number; position: number };
+
+/** The signed-in user's week so far. Positions are null until they've earned something. */
+export type MyWeek = { points: number; position: number | null; countryPosition: number | null };
+
+/** Result of the daily check-in. `awarded` is 0 if they'd already checked in today. */
+export type CheckIn = { awarded: number; streak: number; usedPass?: boolean };
 
 /** Profile fields a user can change themselves. */
 export type ProfilePatch = Partial<
@@ -57,7 +94,14 @@ export type ReelRecord = {
 /** What the signed-in viewer has already done to a reel (all false when signed out). */
 export type ReelViewerState = { cheered: boolean; saved: boolean; replayed: boolean };
 
-export type Reel = ReelRecord & { creator: User; viewer: ReelViewerState };
+export type Reel = ReelRecord & {
+  creator: User;
+  viewer: ReelViewerState;
+  /** Set when this Moment responds to another one. */
+  replyTo?: ReplyTarget | null;
+  /** How many published Moments respond to this one. */
+  responses?: number;
+};
 
 export type CommentRecord = {
   id: string;
@@ -77,7 +121,7 @@ export type Hashtag = {
   trendingScore: number;
 };
 
-export type NotificationType = 'cheer' | 'comment' | 'new_fan' | 'mention' | 'replay' | 'system';
+export type NotificationType = 'cheer' | 'comment' | 'new_fan' | 'mention' | 'replay' | 'response' | 'system';
 
 export type NotificationRecord = {
   id: string;

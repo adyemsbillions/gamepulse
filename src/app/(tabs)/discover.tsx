@@ -4,6 +4,8 @@ import { useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ChallengeCard } from '@/components/challenge-card';
+import { ClubWarsCard } from '@/components/club-wars-card';
 import { ReelGrid } from '@/components/reel-grid';
 import { AppText } from '@/components/ui/app-text';
 import { Avatar } from '@/components/ui/avatar';
@@ -63,10 +65,12 @@ function DiscoverHome() {
   const feed = useFeed();
   return (
     <>
+      <ChallengeCard />
+      <ClubWarsCard />
       {tags.length > 0 && <SectionTitle icon={<Flame size={18} color={Colors.hot} />} title="Hot Now" />}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
         {tags.map((t) => (
-          <Pressable key={t.name} style={styles.tagChip} onPress={() => router.push(`/hashtag/${t.name}`)}>
+          <Pressable key={t.name} accessibilityRole="link" accessibilityLabel={`#${t.name}, ${t.usageCount} Moments`} style={styles.tagChip} onPress={() => router.push(`/hashtag/${t.name}`)}>
             <AppText variant="bodyBold" color={Colors.primary}>
               #{t.name}
             </AppText>
@@ -130,7 +134,7 @@ function SearchResults({ results }: { results: Results }) {
     <>
       {results.users.length > 0 && <SectionTitle title="GameMakers" />}
       {results.users.map((u) => (
-        <Pressable key={u.id} style={styles.row} onPress={() => router.push(`/user/${u.username}`)}>
+        <Pressable key={u.id} accessibilityRole="link" accessibilityLabel={`@${u.username}, ${u.displayName}`} style={styles.row} onPress={() => router.push(`/user/${u.username}`)}>
           <Avatar user={u} size={44} />
           <View style={{ flex: 1 }}>
             <AppText variant="bodyBold">@{u.username}</AppText>
@@ -143,7 +147,7 @@ function SearchResults({ results }: { results: Results }) {
 
       {results.hashtags.length > 0 && <SectionTitle title="Hashtags" />}
       {results.hashtags.map((h) => (
-        <Pressable key={h.name} style={styles.row} onPress={() => router.push(`/hashtag/${h.name}`)}>
+        <Pressable key={h.name} accessibilityRole="link" style={styles.row} onPress={() => router.push(`/hashtag/${h.name}`)}>
           <View style={styles.hashIcon}>
             <Hash size={20} color={Colors.primary} />
           </View>
@@ -158,7 +162,7 @@ function SearchResults({ results }: { results: Results }) {
 
       {results.clubs.length > 0 && <SectionTitle title="Clubs" />}
       {results.clubs.map((club) => (
-        <Pressable key={club} style={styles.row} onPress={() => openClub(club)}>
+        <Pressable key={club} accessibilityRole="link" style={styles.row} onPress={() => openClub(club)}>
           <View style={styles.hashIcon}>
             <Shield size={20} color={Colors.primary} />
           </View>

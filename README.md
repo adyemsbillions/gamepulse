@@ -140,15 +140,64 @@ new APK. Builds check the `production` channel on launch and when they return to
 download quietly, then offer **Restart now**.
 
 ```bash
-npx eas-cli@latest update --channel production --environment production --message "What changed"
+powershell -ExecutionPolicy Bypass -File scripts\publish-update.ps1 -Message "What changed"
 ```
 
-It bundles on this PC (using `.env.local` for the Supabase keys) and uploads; no build quota used.
+It bundles on this PC with the Supabase keys from `.env.local`, checks they're in the bundle, then
+uploads; no build quota used. Don't run `eas update --environment production` by itself: it takes
+env vars from EAS (none are set there), so the update would ship without the Supabase keys and the
+app would fall back to sample data.
 
 A new APK is still needed when **native** code changes: a new package with native code (like
 expo-notifications was), `app.json` plugin/permission changes, or `google-services.json`. When that
 happens, bump `version` in `app.json` (e.g. 1.0.0 → 1.1.0) before building. The runtime version
 follows `version`, so old APKs never receive an update they can't run.
+
+## Ranking (Hot Now, trending hashtags)
+
+Migration `20261004100000_ranking.sql`. `hot_score` = (1 + cheers + 3·comments + 4·replays +
+5·shares + 0.05·views) ÷ (hours since posting + 2)^1.5. `hot_reels` pages Hot Now (and a hashtag's
+**Top** tab) as of a fixed moment, so pages never shift while scrolling; it leaves out muted people
+and Moments marked **Not interested**, and ranks creators you've hidden a Moment from 4× lower.
+`trending_hashtags` adds up the hot scores of each hashtag's Moments from the last 7 days. If the
+migration isn't applied, the app falls back to newest first.
+
+## Pulse Rank and Club Wars
+
+Migration `20261006100000_pulse.sql`. Pulse Points come from what other people do with your
+Moments, awarded by database triggers into `pulse_events` with a unique key per award, so
+toggling a Cheer can't farm points:
+
+| Earned for | Pulse |
+| --- | --- |
+| Posting a Moment (once it's published) | 20 |
+| A Cheer from someone (once per person per Moment) | 2 |
+| A comment from someone (once per person per Moment) | 3 |
+| A replay from someone (once per person per Moment) | 4 |
+| A new Fan (once per person) | 5 |
+| Daily check-in (on opening the app) | 5 + streak days, max 15 |
+
+Ranks from all-time points: Grassroots 0 · Academy 100 · First Team 500 · Captain 2,000 ·
+Legend 10,000 (`src/lib/pulse.ts`). Streaks forgive one missed day per week. **Top fans** and
+**Club Wars** (fans of each club pool their points) count this week only: Monday 00:00 to Sunday
+23:59, Lagos time. Screens: profile Pulse card, Discover's Club Wars card, `/leagues`.
+
+## Weekly Challenges and Duets
+
+Migrations `20261007100000_response_notification.sql` + `20261007100100_challenges_duets.sql`.
+
+- **Challenges** (`challenges` table): one hashtag a week, Monday to Monday (Lagos time). Eight are
+  seeded (#pannachallenge, #keepyuppy, #freekickfriday, #keeperheroics, #trickshot,
+  #signatureskill, #streetfootball, #celebrationremix). Posting a Moment with the tag while it
+  runs earns +10 Pulse. `finish_challenges()` runs hourly (pg_cron, job `finish-challenges`) and
+  crowns the entry with the most Cheers: +100 Pulse, `profiles.challenge_wins` + 1, and a
+  notification to the winner and every entrant. Add more weeks with an insert into `challenges`
+  (staff only through the API; or SQL Editor).
+- **Duets** (`reel_replies`): ••• → *Respond with your Moment* links the new Moment to the original.
+  When it's published, the original's creator gets a `response` notification (and push) and +4
+  Pulse. Reels show "Responding to @x" and "N responses".
+
+After changing the push wording, redeploy: `npx supabase functions deploy push --no-verify-jwt --use-api`.
 
 ## Block, mute and rate limits
 
@@ -160,6 +209,27 @@ follows `version`, so old APKs never receive an update they can't run.
   cheers 40/min and 600/hour, replays 20/min, supports 20/min and 200/hour, reports 5/min and
   30/hour. Over the limit the app shows a friendly message. Uploads are capped at 20/day by the
   videos function; sign-in attempts by Supabase Auth (Dashboard → Authentication → Rate Limits).
+
+## Video quality
+
+Bunny encodes 240p–1080p, but its playlist lists 360p first and the player rarely climbs before a
+short clip ends. `playbackUrl()` in `src/lib/media.ts` reads the playlist and plays the best
+quality up to 720p directly (about 2.5 Mbps), falling back to the full playlist if anything's off.
+The feed picks it for the next two Moments ahead of time.
+
+## Account deletion
+
+Profile → ⚙ → **Delete account** (required by Google Play and the App Store). The `account` Edge
+Function deletes the person's Bunny videos, reels, profile photos, then the login, which cascades
+to every row that belongs to them. Deploy once:
+
+```bash
+npx supabase functions deploy account --no-verify-jwt --use-api
+```
+
+It uses the same `BUNNY_*` secrets as `videos`. Google Play also needs a web page or form where
+people can request deletion without the app; link it in the Play Console's Data safety section.
+Tests: `npx tsx supabase/tests/account_function.test.ts`.
 
 ## Profile photos
 

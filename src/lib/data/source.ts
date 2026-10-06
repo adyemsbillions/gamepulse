@@ -1,6 +1,11 @@
 import type {
   AppNotification,
+  Challenge,
+  CheckIn,
+  ClubStanding,
   Comment,
+  FanStanding,
+  MyWeek,
   Hashtag,
   LocalImage,
   Page,
@@ -12,9 +17,24 @@ import type {
 
 /**
  * Which reels a feed shows. `club`: reels by fans of that club. `saved`: the signed-in user's
- * saved reels, most recently saved first.
+ * saved reels, most recently saved first. With no filter it's Hot Now (ranked). `sort` applies to
+ * hashtag feeds: 'hot' for Top, 'latest' (default) for newest first.
  */
-export type FeedFilter = { hashtag?: string; username?: string; club?: string; saved?: boolean };
+export type FeedFilter = {
+  hashtag?: string;
+  username?: string;
+  club?: string;
+  saved?: boolean;
+  sort?: 'hot' | 'latest';
+  /** A challenge's entries, most Cheers first. */
+  challenge?: string;
+  /** Moments responding to this reel, newest first. */
+  respondsTo?: string;
+};
+
+/** True when a feed is ranked by the hot score (Hot Now, or a hashtag's Top). */
+export const isRankedFeed = (f: FeedFilter) =>
+  !f.saved && !f.username && !f.club && !f.challenge && !f.respondsTo && (!f.hashtag || f.sort === 'hot');
 
 export type SearchResults = { users: User[]; hashtags: Hashtag[]; clubs: string[]; reels: Reel[] };
 
@@ -59,14 +79,35 @@ export interface DataSource {
   setBlock(userId: string, on: boolean): Promise<void>;
   /** Mute: their Moments stop showing in your Hot Now feed. Private; they aren't told. */
   setMute(userId: string, on: boolean): Promise<void>;
+  /** Not interested: this reel leaves your Hot Now and its creator ranks lower for you. */
+  notInterested(reelId: string): Promise<void>;
   addComment(reelId: string, body: string, parentId?: string | null): Promise<Comment>;
   markNotificationsRead(): Promise<void>;
   report(input: { reelId: string; reason: ReportReason; details?: string }): Promise<void>;
   updateProfile(patch: ProfilePatch): Promise<User>;
   /** Upload a new profile photo and make it the signed-in user's avatar. */
   uploadAvatar(image: LocalImage): Promise<User>;
+  /** Permanently delete the signed-in user's account, Moments, videos, photos and activity. */
+  deleteAccount(): Promise<void>;
   recordView(reelId: string): Promise<void>;
   recordShare(reelId: string): Promise<void>;
+
+  // ---- Pulse Rank and Club Wars
+  /** Daily check-in: keeps the streak going and gives today's points. Null when signed out. */
+  checkIn(): Promise<CheckIn | null>;
+  /** Top fans by points earned this week; `country` narrows it to one country. */
+  topFans(country: string | null): Promise<FanStanding[]>;
+  /** The signed-in user's points and positions this week (null when signed out). */
+  myWeek(): Promise<MyWeek | null>;
+  /** Clubs ranked by the points their fans earned this week. */
+  clubWars(): Promise<ClubStanding[]>;
+
+  // ---- weekly challenges and duets
+  /** The challenge running now, and the one before it (with its winner once crowned). */
+  challenges(): Promise<{ current: Challenge | null; previous: Challenge | null }>;
+  challenge(id: string): Promise<Challenge | null>;
+  /** Mark a new reel as a response to another (call right after startUpload). */
+  linkResponse(reelId: string, replyTo: string): Promise<void>;
 
   // ---- push notifications (GP-017)
   /** Send the signed-in user's notifications to this device. Moves the token over if another account had it. */

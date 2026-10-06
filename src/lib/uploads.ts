@@ -13,6 +13,7 @@ import { Upload } from 'tus-js-client';
 import { data } from './api';
 import { UserFacingError, type UploadTicket } from './data/source';
 import { keys, queryClient } from './queries';
+import type { ReplyTarget } from './types';
 
 export type PickedVideo = {
   uri: string;
@@ -32,6 +33,8 @@ export type UploadJob = {
   video: PickedVideo;
   caption: string;
   tags: string[];
+  /** The reel this Moment responds to (a duet), if any. */
+  replyTo: string | null;
   phase: UploadPhase;
   /** 0 → 1 while uploading. */
   progress: number;
@@ -65,12 +68,23 @@ export function useUploads(): UploadJob[] {
   );
 }
 
+/** What a new Moment starts with: a challenge's hashtag, or the Moment it responds to. */
+export type DraftPreset = { caption?: string; replyTo?: ReplyTarget; label: string };
+
 // The video picked on the Create tab, handed to the compose screen.
 let draft: PickedVideo | null = null;
+let preset: DraftPreset | null = null;
 let posted = false;
+const presetListeners = new Set<() => void>();
 export const draftVideo = {
   set: (v: PickedVideo | null) => void (draft = v),
   get: () => draft,
+  /** Set from "Join challenge" or "Respond with your Moment"; cleared once posted or dismissed. */
+  setPreset: (p: DraftPreset | null) => {
+    preset = p;
+    presetListeners.forEach((l) => l());
+  },
+  getPreset: () => preset,
   /** Compose just posted; the Create tab switches to Profile when it's back in focus. */
   markPosted: () => void (posted = true),
   consumePosted: () => {
@@ -80,12 +94,23 @@ export const draftVideo = {
   },
 };
 
+export function useDraftPreset(): DraftPreset | null {
+  return useSyncExternalStore(
+    (l) => {
+      presetListeners.add(l);
+      return () => presetListeners.delete(l);
+    },
+    () => preset,
+    () => preset,
+  );
+}
+
 export const uploads = {
   /** Start posting. Returns immediately; follow progress with `useUploads`. */
-  post(video: PickedVideo, caption: string, tags: string[]) {
+  post(video: PickedVideo, caption: string, tags: string[], replyTo: string | null = null) {
     const id = `up_${Date.now()}`;
     jobs = [
-      { id, video, caption, tags, phase: 'preparing', progress: 0, reelId: null, error: null, slow: false },
+      { id, video, caption, tags, replyTo, phase: 'preparing', progress: 0, reelId: null, error: null, slow: false },
       ...jobs,
     ];
     internals.set(id, { ticket: null, ticketExpires: 0, upload: null, cancelled: false });
@@ -140,6 +165,9 @@ async function run(id: string) {
       });
       internal.ticket = ticket;
       internal.upload = null;
+      // Link the response now, while the reel is still a draft; the original's creator is told
+      // when it's published. Best effort: a failed link just posts it as a normal Moment.
+      if (job.replyTo) data.linkResponse(ticket.reelId, job.replyTo).catch(() => {});
       const expire = Number(ticket.upload?.headers.AuthorizationExpire ?? 0) * 1000;
       internal.ticketExpires = expire ? expire - 10 * 60_000 : Date.now() + 60 * 60_000;
     }
@@ -159,6 +187,8 @@ async function run(id: string) {
       patch(id, { phase: 'published' });
       queryClient.invalidateQueries({ queryKey: ['feed'] });
       queryClient.invalidateQueries({ queryKey: ['hashtags'] });
+      queryClient.invalidateQueries({ queryKey: ['challenges'] });
+      queryClient.invalidateQueries({ queryKey: ['me'] });
       queryClient.invalidateQueries({ queryKey: keys.reel(ticket.reelId) });
     } else if (status === 'failed' || status === 'removed') {
       internal.ticket = null;

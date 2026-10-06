@@ -1,6 +1,6 @@
 import { useIsFocused } from 'expo-router';
 import { Volume2, VolumeX } from 'lucide-react-native';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   FlatList,
   Platform,
@@ -16,6 +16,7 @@ import { ReelItem } from './reel-item';
 import { ErrorView, LoadingView, PulseLoader } from '@/components/ui/states';
 import { AppText } from '@/components/ui/app-text';
 import { Colors, Spacing } from '@/constants/theme';
+import { playbackUrl } from '@/lib/media';
 import type { Reel } from '@/lib/types';
 
 /** How many Reels either side of the active one get a live (buffering) player. */
@@ -70,6 +71,13 @@ export function ReelFeed({
     },
     [],
   );
+
+  // Pick the stream for the next couple of Reels ahead of time, so swiping never waits on it.
+  useEffect(() => {
+    for (let i = activeIndex + 1; i <= activeIndex + 2 && i < reels.length; i++) {
+      void playbackUrl(reels[i].playbackUrl);
+    }
+  }, [activeIndex, reels]);
 
   const togglePause = useCallback(
     (id: string) => setPausedId((current) => (current === id ? null : id)),

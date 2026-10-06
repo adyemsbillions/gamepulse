@@ -11,9 +11,10 @@ import { Avatar } from '@/components/ui/avatar';
 import { Colors, Spacing } from '@/constants/theme';
 import { data } from '@/lib/api';
 import { requireSignIn } from '@/lib/auth';
+import { respondTo } from '@/lib/challenges';
 import { adjustCount, engagement, useCheered, useReplayed, useSaved } from '@/lib/engagement-store';
 import { formatCount } from '@/lib/format';
-import { useDeleteReel } from '@/lib/queries';
+import { useDeleteReel, useNotInterested } from '@/lib/queries';
 import { useSessionUserId } from '@/lib/session';
 import type { Reel, User } from '@/lib/types';
 import { useSafetyActions } from '@/lib/use-safety-actions';
@@ -25,6 +26,7 @@ export function ReelActions({ reel, creator }: { reel: Reel; creator: User }) {
   const isMine = useSessionUserId() === reel.userId;
   const deleteReel = useDeleteReel();
   const safety = useSafetyActions(creator);
+  const notInterested = useNotInterested();
 
   const share = async () => {
     const result = await Share.share({
@@ -55,13 +57,21 @@ export function ReelActions({ reel, creator }: { reel: Reel; creator: User }) {
       : actionSheet.show({
           title: `@${creator.username}'s Moment`,
           options: [
+            { label: 'Respond with your Moment', onPress: () => respondTo(reel) },
             {
               label: 'Report',
               destructive: true,
               onPress: () => requireSignIn() && router.push(`/report?reelId=${reel.id}`),
             },
             ...safety.options,
-            { label: 'Not interested', onPress: () => {} },
+            {
+              label: 'Not interested',
+              onPress: () =>
+                requireSignIn() &&
+                notInterested.mutate(reel.id, {
+                  onError: () => Alert.alert("That didn't go through", 'Check your connection and try again.'),
+                }),
+            },
           ],
         });
 
@@ -121,7 +131,12 @@ function Action({
   onPress: () => void;
 }) {
   return (
-    <Pressable accessibilityLabel={label} hitSlop={6} onPress={onPress} style={styles.action}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={count !== undefined ? `${label}, ${formatCount(count)}` : label}
+      hitSlop={6}
+      onPress={onPress}
+      style={styles.action}>
       {icon}
       {count !== undefined && (
         <AppText variant="label" color={Colors.iceWhite} style={styles.shadow}>

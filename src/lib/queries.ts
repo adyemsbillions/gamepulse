@@ -4,6 +4,7 @@
  */
 import {
   focusManager,
+  type InfiniteData,
   QueryClient,
   useInfiniteQuery,
   useMutation,
@@ -14,7 +15,7 @@ import { AppState, Platform } from 'react-native';
 
 import { data, type FeedFilter } from './api';
 import type { ReportReason } from './data/source';
-import type { LocalImage, ProfilePatch, User } from './types';
+import type { LocalImage, Page, ProfilePatch, Reel, User } from './types';
 import { useSessionUserId } from './session';
 
 export const queryClient = new QueryClient({
@@ -35,9 +36,23 @@ export const keys = {
   feed: (filter: FeedFilter, uid: string | null | undefined) =>
     filter.saved
       ? (['feed', 'saved', uid ?? null] as const)
-      : (['feed', 'public', filter.hashtag ?? null, filter.username ?? null, filter.club?.toLowerCase() ?? null] as const),
+      : ([
+          'feed',
+          'public',
+          filter.hashtag ?? null,
+          filter.username ?? null,
+          filter.club?.toLowerCase() ?? null,
+          filter.sort ?? null,
+          filter.challenge ?? null,
+          filter.respondsTo ?? null,
+        ] as const),
+  challenges: ['challenges'] as const,
+  challenge: (id: string) => ['challenges', id] as const,
   savedFeed: ['feed', 'saved'] as const,
   clubFans: (club: string) => ['club-fans', club.toLowerCase()] as const,
+  clubWars: ['pulse', 'clubs'] as const,
+  topFans: (country: string | null) => ['pulse', 'fans', country] as const,
+  myWeek: (uid: string | null | undefined) => ['pulse', 'me', uid ?? null] as const,
   mySupports: (uid: string | null | undefined) => ['my-supports', uid ?? null] as const,
   relations: (uid: string | null | undefined) => ['relations', uid ?? null] as const,
   blockedUsers: (uid: string | null | undefined) => ['blocked-users', uid ?? null] as const,
@@ -63,7 +78,11 @@ export function useFeed(filter: FeedFilter = {}, { enabled = true }: { enabled?:
     // Saved reels belong to whoever is signed in; wait until we know who that is.
     enabled: enabled && (!filter.saved || uid !== undefined),
   });
-  const reels = useMemo(() => query.data?.pages.flatMap((p) => p.items) ?? [], [query.data]);
+  // A reel can land on two pages if the ranking shifted between them; show it once.
+  const reels = useMemo(() => {
+    const seen = new Set<string>();
+    return (query.data?.pages.flatMap((p) => p.items) ?? []).filter((r) => !seen.has(r.id) && !!seen.add(r.id));
+  }, [query.data]);
   return { ...query, reels };
 }
 
@@ -135,6 +154,30 @@ export function useClubFans(club: string | undefined) {
     queryFn: () => data.clubFans(club!),
     enabled: !!club,
   });
+}
+
+// ---- Pulse Rank and Club Wars (weekly tables move slowly; a minute's staleness is fine)
+
+export function useClubWars() {
+  return useQuery({ queryKey: keys.clubWars, queryFn: () => data.clubWars(), staleTime: 60_000 });
+}
+
+export function useTopFans(country: string | null, enabled = true) {
+  return useQuery({ queryKey: keys.topFans(country), queryFn: () => data.topFans(country), staleTime: 60_000, enabled });
+}
+
+export function useMyWeek() {
+  const uid = useSessionUserId();
+  return useQuery({ queryKey: keys.myWeek(uid), queryFn: () => data.myWeek(), enabled: !!uid, staleTime: 60_000 });
+}
+
+/** This week's challenge and last week's (with its winner). */
+export function useChallenges() {
+  return useQuery({ queryKey: keys.challenges, queryFn: () => data.challenges(), staleTime: 60_000 });
+}
+
+export function useChallenge(id: string | undefined) {
+  return useQuery({ queryKey: keys.challenge(id ?? ''), queryFn: () => data.challenge(id!), enabled: !!id });
 }
 
 /** Creator ids the signed-in user supports (empty when signed out). */
@@ -243,6 +286,21 @@ export function useSetMute() {
   return useMutation({
     mutationFn: ({ userId, on }: { userId: string; on: boolean }) => data.setMute(userId, on),
     onSuccess: relationsChanged,
+  });
+}
+
+type FeedCache = InfiniteData<Page<Reel>, string | null>;
+
+/** "Not interested": the reel disappears from public feeds at once, then the server remembers it. */
+export function useNotInterested() {
+  return useMutation({
+    mutationFn: (reelId: string) => data.notInterested(reelId),
+    onMutate: (reelId) => {
+      queryClient.setQueriesData<FeedCache>({ queryKey: ['feed', 'public'] }, (old) =>
+        old ? { ...old, pages: old.pages.map((p) => ({ ...p, items: p.items.filter((r) => r.id !== reelId) })) } : old,
+      );
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['feed', 'public'] }),
   });
 }
 

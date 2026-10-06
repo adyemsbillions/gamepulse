@@ -49,7 +49,7 @@ function BlockedRow({ user }: { user: User }) {
   const safety = useSafetyActions(user);
   return (
     <View style={styles.row}>
-      <Pressable style={styles.who} onPress={() => router.push(`/user/${user.username}`)}>
+      <Pressable accessibilityRole="link" style={styles.who} onPress={() => router.push(`/user/${user.username}`)}>
         <Avatar user={user} size={44} />
         <View style={styles.flex}>
           <AppText variant="bodyBold">@{user.username}</AppText>

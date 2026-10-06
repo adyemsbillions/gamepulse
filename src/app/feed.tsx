@@ -11,15 +11,27 @@ import { useFeed } from '@/lib/queries';
 /** Full-screen feed scoped to a hashtag, creator, club or your saved Moments, opened from a grid. */
 export default function ScopedFeed() {
   const insets = useSafeAreaInsets();
-  const { hashtag, username, club, saved, start } = useLocalSearchParams<{
+  const { hashtag, username, club, saved, sort, challenge, respondsTo, start } = useLocalSearchParams<{
     hashtag?: string;
     username?: string;
     club?: string;
     saved?: string;
+    sort?: string;
+    challenge?: string;
+    respondsTo?: string;
     start?: string;
   }>();
 
-  const feed = useFeed({ hashtag, username, club, saved: saved === '1' });
+  // Same filter (and cache) as the grid it was opened from, so the tapped Moment is already loaded.
+  const feed = useFeed({
+    hashtag,
+    username,
+    club,
+    saved: saved === '1',
+    sort: sort === 'hot' || sort === 'latest' ? sort : undefined,
+    challenge,
+    respondsTo,
+  });
   const reels = feed.reels;
   const initialIndex = Math.max(0, reels.findIndex((r) => r.id === start));
 

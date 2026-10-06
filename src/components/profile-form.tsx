@@ -211,7 +211,7 @@ export function ProfileForm({ user, submitLabel, onSaved }: Props) {
         {clubMatches.length > 0 && (
           <View style={[styles.chips, styles.suggestions]}>
             {clubMatches.map((c) => (
-              <Pressable key={c} onPress={() => setClub(c)} style={styles.chip}>
+              <Pressable key={c} accessibilityRole="button" accessibilityLabel={`Choose ${c}`} onPress={() => setClub(c)} style={styles.chip}>
                 <AppText variant="label">{c}</AppText>
               </Pressable>
             ))}

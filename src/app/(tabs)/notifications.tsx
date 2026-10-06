@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback } from 'react';
-import { AtSign, Bell, MessageCircle, Repeat2, UserPlus, type LucideIcon } from 'lucide-react-native';
+import { AtSign, Bell, MessageCircle, Repeat2, Reply, UserPlus, type LucideIcon } from 'lucide-react-native';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -21,6 +21,7 @@ const ICONS: Record<Exclude<NotificationType, 'cheer'>, LucideIcon> = {
   new_fan: UserPlus,
   mention: AtSign,
   replay: Repeat2,
+  response: Reply,
   system: Bell,
 };
 
@@ -87,7 +88,7 @@ function NotificationRow({ n }: { n: AppNotification }) {
   };
 
   return (
-    <Pressable onPress={open} style={[styles.row, !n.read && styles.unread]}>
+    <Pressable accessibilityRole="button" accessibilityState={{ selected: !n.read }} onPress={open} style={[styles.row, !n.read && styles.unread]}>
       <View>
         {actor ? (
           <Avatar user={actor} size={46} />

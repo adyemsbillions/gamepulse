@@ -3,11 +3,34 @@
  * Used whenever EXPO_PUBLIC_SUPABASE_URL is not set.
  */
 import * as mock from '../mock-data';
-import type { Comment, Reel, ReelRecord, User } from '../types';
+import { weekEndsAt } from '../pulse';
+import type { Challenge, Comment, Reel, ReelRecord, User } from '../types';
 
 import { FEED_PAGE_SIZE, normalizeHashtag, rankClubs, type DataSource, type FeedFilter } from './source';
 
 const sameClub = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+const mockPulse = { checkedIn: '', streak: 2 };
+const mockReplies = new Map<string, string>();
+
+/** A challenge that's always running in sample mode, ending next Monday. */
+function mockChallenge(): Challenge {
+  const ends = weekEndsAt();
+  return {
+    id: 'ch_panna',
+    tag: 'skills',
+    title: 'Panna Challenge',
+    description: 'Nutmeg someone. Clean, cheeky, on camera.',
+    emoji: '🥜',
+    startsAt: new Date(ends - 7 * 86_400_000).toISOString(),
+    endsAt: new Date(ends).toISOString(),
+    entries: mock.reels.filter((r) => r.hashtags.includes('skills')).length,
+    winner: null,
+    winnerReelId: null,
+    finished: false,
+  };
+}
+const weekPointsFor = (u: User) => 15 + ((u.fans * 7 + u.username.length * 13) % 240);
 
 // Sample-mode engagement lives in memory for the session.
 const mine = {
@@ -17,14 +40,21 @@ const mine = {
   supports: new Set(['u_2']),
   blocked: new Set<string>(),
   muted: new Set<string>(),
+  hidden: new Set<string>(),
 };
 
 const usersById = new Map(mock.users.map((u) => [u.id, u]));
-const withCreator = (r: ReelRecord): Reel => ({
-  ...r,
-  creator: usersById.get(r.userId)!,
-  viewer: { cheered: mine.cheers.has(r.id), saved: mine.saves.has(r.id), replayed: mine.replays.has(r.id) },
-});
+const withCreator = (r: ReelRecord): Reel => {
+  const replyTo = mockReplies.get(r.id);
+  const original = replyTo ? mock.reels.find((x) => x.id === replyTo) : undefined;
+  return {
+    ...r,
+    creator: usersById.get(r.userId)!,
+    viewer: { cheered: mine.cheers.has(r.id), saved: mine.saves.has(r.id), replayed: mine.replays.has(r.id) },
+    replyTo: original ? { reelId: original.id, username: usersById.get(original.userId)?.username ?? '' } : null,
+    responses: [...mockReplies.values()].filter((id) => id === r.id).length,
+  };
+};
 const toggle = (set: Set<string>, id: string, on: boolean) => void (on ? set.add(id) : set.delete(id));
 
 function score(r: ReelRecord) {
@@ -36,7 +66,13 @@ function score(r: ReelRecord) {
 function filterFeed(filter: FeedFilter): ReelRecord[] {
   let list = mock.reels.filter((r) => r.status === 'published' && !mine.blocked.has(r.userId));
   if (filter.saved) return list.filter((r) => mine.saves.has(r.id));
-  if (!filter.hashtag && !filter.username && !filter.club) list = list.filter((r) => !mine.muted.has(r.userId));
+  if (filter.respondsTo) return list.filter((r) => mockReplies.get(r.id) === filter.respondsTo);
+  if (filter.challenge) {
+    const tag = mockChallenge().tag;
+    return list.filter((r) => r.hashtags.includes(tag)).sort((a, b) => b.cheers - a.cheers);
+  }
+  if (!filter.hashtag && !filter.username && !filter.club)
+    list = list.filter((r) => !mine.muted.has(r.userId) && !mine.hidden.has(r.id));
   if (filter.club) {
     const club = filter.club;
     list = list.filter((r) => sameClub(usersById.get(r.userId)?.favoriteClub ?? '', club));
@@ -51,6 +87,7 @@ function filterFeed(filter: FeedFilter): ReelRecord[] {
       b.createdAt.localeCompare(a.createdAt),
     );
   }
+  if (filter.hashtag && filter.sort !== 'hot') return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return list.sort((a, b) => score(b) - score(a));
 }
 
@@ -147,6 +184,10 @@ export const mockSource: DataSource = {
     toggle(mine.muted, userId, on);
   },
 
+  async notInterested(reelId) {
+    mine.hidden.add(reelId);
+  },
+
   async usernameAvailable(username) {
     return !mock.users.some((u) => u.username === username && u.id !== mock.CURRENT_USER_ID);
   },
@@ -195,6 +236,61 @@ export const mockSource: DataSource = {
     Object.assign(me, patch);
     return me;
   },
+
+  // Sample mode: made-up but stable weekly numbers from the sample users.
+  async checkIn() {
+    const today = new Date().toDateString();
+    if (mockPulse.checkedIn === today) return { awarded: 0, streak: mockPulse.streak };
+    mockPulse.checkedIn = today;
+    mockPulse.streak += 1;
+    return { awarded: 5 + Math.min(mockPulse.streak - 1, 10), streak: mockPulse.streak };
+  },
+
+  async topFans(country) {
+    return mock.users
+      .filter((u) => !country || u.country === country)
+      .map((u) => ({ user: u, weekPoints: weekPointsFor(u) }))
+      .sort((a, b) => b.weekPoints - a.weekPoints)
+      .map((row, i) => ({ ...row, position: i + 1 }));
+  },
+
+  async myWeek() {
+    const me = usersById.get(mock.CURRENT_USER_ID)!;
+    const fans = await mockSource.topFans(null);
+    const local = await mockSource.topFans(me.country);
+    return {
+      points: weekPointsFor(me),
+      position: fans.find((f) => f.user.id === me.id)?.position ?? null,
+      countryPosition: local.find((f) => f.user.id === me.id)?.position ?? null,
+    };
+  },
+
+  async clubWars() {
+    const clubs = new Map<string, { club: string; points: number; fans: number }>();
+    for (const u of mock.users) {
+      const key = u.favoriteClub.toLowerCase();
+      const entry = clubs.get(key) ?? { club: u.favoriteClub, points: 0, fans: 0 };
+      entry.points += weekPointsFor(u);
+      entry.fans += 1;
+      clubs.set(key, entry);
+    }
+    return [...clubs.values()].sort((a, b) => b.points - a.points).map((c, i) => ({ ...c, position: i + 1 }));
+  },
+
+  async challenges() {
+    return { current: mockChallenge(), previous: null };
+  },
+
+  async challenge(id) {
+    return id === mockChallenge().id ? mockChallenge() : null;
+  },
+
+  async linkResponse(reelId, replyTo) {
+    mockReplies.set(reelId, replyTo);
+  },
+
+  // Sample mode has no real account to delete.
+  async deleteAccount() {},
 
   // Sample mode: the photo stays on this device.
   async uploadAvatar(image) {

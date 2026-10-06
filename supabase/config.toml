@@ -421,3 +421,7 @@ verify_jwt = false
 
 [functions.push]
 verify_jwt = false
+
+# Account deletion: checks the signed-in user itself (see account/handler.ts).
+[functions.account]
+verify_jwt = false

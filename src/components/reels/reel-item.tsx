@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { BadgeCheck, Play } from 'lucide-react-native';
+import { BadgeCheck, Layers, Play, Reply } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -9,6 +9,7 @@ import { BURST_MS, CheerBursts, type Burst } from './cheer-burst';
 import { ReelActions } from './reel-actions';
 import { ReelCaption } from './reel-caption';
 import { ReelVideo, SCRUBBER_HEIGHT } from './reel-video';
+import { VideoFades } from './video-fades';
 
 import { AppText } from '@/components/ui/app-text';
 import { Button } from '@/components/ui/button';
@@ -16,6 +17,7 @@ import { Colors, Spacing } from '@/constants/theme';
 import { data } from '@/lib/api';
 import { requireSignIn } from '@/lib/auth';
 import { engagement, useCheered, useSupporting } from '@/lib/engagement-store';
+import { formatCount } from '@/lib/format';
 import { imageSource } from '@/lib/media';
 import { useMySupports } from '@/lib/queries';
 import { useSessionUserId } from '@/lib/session';
@@ -128,13 +130,13 @@ export const ReelItem = memo(function ReelItem({
 
       <CheerBursts bursts={bursts} />
 
-      <View pointerEvents="none" style={styles.scrim} />
+      <VideoFades />
 
       {/* Clear of the scrubber along the bottom edge, so dragging it never hits a button. */}
       <View style={[styles.overlay, { paddingBottom: bottomInset + SCRUBBER_HEIGHT }]} pointerEvents="box-none">
         <View style={styles.info} pointerEvents="box-none">
           <View style={styles.creatorRow}>
-            <Pressable onPress={() => router.push(`/user/${creator.username}`)} style={styles.creatorName}>
+            <Pressable accessibilityRole="link" accessibilityLabel={`@${creator.username}${creator.verified ? ', verified' : ''}`} onPress={() => router.push(`/user/${creator.username}`)} style={styles.creatorName}>
               <AppText variant="bodyBold" color={Colors.iceWhite} style={styles.shadow}>
                 @{creator.username}
               </AppText>
@@ -154,6 +156,37 @@ export const ReelItem = memo(function ReelItem({
             {creator.countryFlag} {creator.country} · {creator.favoriteClub}
           </AppText>
           <ReelCaption caption={reel.caption} hashtags={reel.hashtags} />
+          {(reel.replyTo || (reel.responses ?? 0) > 0) && (
+            <View style={styles.duetRow}>
+              {reel.replyTo && (
+                <Pressable
+                  accessibilityRole="link"
+                  accessibilityLabel={reel.replyTo.username ? `Responding to @${reel.replyTo.username}. Open it.` : 'Open the original Moment'}
+                  onPress={() =>
+                    reel.replyTo?.username
+                      ? router.push({ pathname: '/feed', params: { username: reel.replyTo.username, start: reel.replyTo.reelId } })
+                      : undefined
+                  }
+                  style={styles.duetChip}>
+                  <Reply size={13} color={Colors.iceWhite} />
+                  <AppText variant="label" color={Colors.iceWhite}>
+                    {reel.replyTo.username ? `Responding to @${reel.replyTo.username}` : 'Responding to a Moment'}
+                  </AppText>
+                </Pressable>
+              )}
+              {(reel.responses ?? 0) > 0 && (
+                <Pressable
+                  accessibilityRole="link"
+                  onPress={() => router.push({ pathname: '/feed', params: { respondsTo: reel.id } })}
+                  style={styles.duetChip}>
+                  <Layers size={13} color={Colors.iceWhite} />
+                  <AppText variant="label" color={Colors.iceWhite}>
+                    {formatCount(reel.responses ?? 0)} {reel.responses === 1 ? 'response' : 'responses'}
+                  </AppText>
+                </Pressable>
+              )}
+            </View>
+          )}
         </View>
         <ReelActions reel={reel} creator={creator} />
       </View>
@@ -174,14 +207,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingLeft: 4,
   },
-  scrim: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '38%',
-    backgroundColor: 'rgba(8, 29, 77, 0.28)',
-  },
   overlay: {
     position: 'absolute',
     left: 0,
@@ -195,6 +220,16 @@ const styles = StyleSheet.create({
   info: { flex: 1, gap: Spacing.one },
   creatorRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   creatorName: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  duetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.one },
+  duetChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: Spacing.two + 2,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+  },
   supportBtn: {
     paddingVertical: 2,
     paddingHorizontal: Spacing.three,

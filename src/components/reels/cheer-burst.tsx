@@ -3,7 +3,9 @@ import { StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
   interpolate,
+  ReduceMotion,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withDelay,
   withTiming,
@@ -53,13 +55,25 @@ function CheerBurst({ x, y, tilt }: { x: number; y: number; tilt: number }) {
   const rings = useSharedValue(0);
   const out = useSharedValue(0);
 
+  const reduceMotion = useReducedMotion();
+
   useEffect(() => {
+    if (reduceMotion) {
+      // No drop, spin or rings: the ball appears where you tapped and fades away.
+      fall.value = 1;
+      spin.value = 0;
+      out.value = withDelay(
+        BURST_MS - 500,
+        withTiming(1, { duration: 400, easing: Easing.linear, reduceMotion: ReduceMotion.Never }),
+      );
+      return;
+    }
     fall.value = withTiming(1, { duration: DROP, easing: Easing.bounce });
     spin.value = withTiming(0, { duration: DROP + 120, easing: Easing.out(Easing.cubic) });
     trace.value = withDelay(DROP * 0.55, withTiming(1, { duration: 520, easing: Easing.out(Easing.quad) }));
     rings.value = withDelay(DROP * 0.5, withTiming(1, { duration: 760, easing: Easing.out(Easing.quad) }));
     out.value = withDelay(BURST_MS - 330, withTiming(1, { duration: 330, easing: Easing.in(Easing.back(2)) }));
-  }, [fall, spin, trace, rings, out]);
+  }, [fall, spin, trace, rings, out, reduceMotion]);
 
   const ballStyle = useAnimatedStyle(() => ({
     opacity: interpolate(fall.value, [0, 0.15], [0, 1], 'clamp') * (1 - out.value),

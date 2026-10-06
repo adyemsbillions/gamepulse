@@ -6,9 +6,13 @@ import { FunctionsHttpError, type SupabaseClient } from '@supabase/supabase-js';
 
 import type {
   AppNotification,
+  Challenge,
+  CheckIn,
   Comment,
+  MyWeek,
   Hashtag,
   NotificationType,
+  Page,
   ProfilePatch,
   Reel,
   ReelStatus,
@@ -17,6 +21,7 @@ import type {
 
 import {
   FEED_PAGE_SIZE,
+  isRankedFeed,
   normalizeHashtag,
   rankClubs,
   UserFacingError,
@@ -29,12 +34,19 @@ import { CLUB_SUGGESTIONS } from '@/constants/places';
 /** Public bucket; each user may only write inside a folder named after their id. */
 const AVATAR_BUCKET = 'avatars';
 
+// pulse_points / streak_days come from 20261006100000_pulse.sql; apply it before shipping this.
 const PROFILE =
-  'id, username, display_name, bio, avatar_url, country, country_flag, favorite_club, verified, onboarded, fans_count, supporting_count';
+  'id, username, display_name, bio, avatar_url, country, country_flag, favorite_club, verified, onboarded, fans_count, supporting_count, pulse_points, streak_days, challenge_wins';
 
+// reply / responses come from 20261007100100_challenges_duets.sql; apply it before shipping this.
 const REEL = `id, user_id, caption, status, playback_url, thumbnail_url, duration_sec,
   cheers_count, comments_count, replays_count, shares_count, views_count, created_at, published_at,
-  creator:profiles!reels_user_id_fkey(${PROFILE}), tags:reel_hashtags(tag)`;
+  creator:profiles!reels_user_id_fkey(${PROFILE}), tags:reel_hashtags(tag),
+  reply:reel_replies!reel_replies_reel_id_fkey(reply_to, original:reels!reel_replies_reply_to_fkey(creator:profiles!reels_user_id_fkey(username))),
+  responses:reel_replies!reel_replies_reply_to_fkey(count)`;
+
+const CHALLENGE = `id, tag, title, description, emoji, starts_at, ends_at, winner_reel_id, finished_at, entry_count,
+  winner:profiles!challenges_winner_user_id_fkey(${PROFILE})`;
 
 /** Signed-in only: the viewer's own cheer/save/replay rows, filtered to them in `reelQuery`. */
 const VIEWER = `, my_cheers:cheers(user_id), my_saves:saves(user_id), my_replays:replays(user_id)`;
@@ -55,7 +67,28 @@ type ProfileRow = {
   onboarded: boolean;
   fans_count: number;
   supporting_count: number;
+  pulse_points?: number;
+  streak_days?: number;
+  challenge_wins?: number;
 };
+
+type ChallengeRow = {
+  id: string;
+  tag: string;
+  title: string;
+  description: string;
+  emoji: string;
+  starts_at: string;
+  ends_at: string;
+  winner_reel_id: string | null;
+  finished_at: string | null;
+  entry_count: number;
+  winner: ProfileRow | null;
+};
+
+// `place`, not `position`: that's a reserved word in Postgres.
+type FanStandingRow = ProfileRow & { week_points: number; place: number };
+type ClubStandingRow = { club: string; points: number; fans: number; place: number };
 
 type ReelRow = {
   id: string;
@@ -77,6 +110,8 @@ type ReelRow = {
   my_cheers?: unknown[];
   my_saves?: unknown[];
   my_replays?: unknown[];
+  reply?: { reply_to: string; original: { creator: { username: string } | null } | null } | null;
+  responses?: { count: number }[];
 };
 
 type CommentRow = {
@@ -117,6 +152,23 @@ export const toUser = (p: ProfileRow): User => ({
   onboarded: p.onboarded,
   fans: p.fans_count,
   supporting: p.supporting_count,
+  pulsePoints: p.pulse_points ?? 0,
+  streakDays: p.streak_days ?? 0,
+  challengeWins: p.challenge_wins ?? 0,
+});
+
+const toChallenge = (c: ChallengeRow): Challenge => ({
+  id: c.id,
+  tag: c.tag,
+  title: c.title,
+  description: c.description,
+  emoji: c.emoji,
+  startsAt: c.starts_at,
+  endsAt: c.ends_at,
+  entries: Number(c.entry_count ?? 0),
+  winner: c.winner ? toUser(c.winner) : null,
+  winnerReelId: c.winner_reel_id,
+  finished: !!c.finished_at,
 });
 
 export const toReel = (r: ReelRow): Reel => ({
@@ -140,6 +192,9 @@ export const toReel = (r: ReelRow): Reel => ({
     saved: (r.my_saves?.length ?? 0) > 0,
     replayed: (r.my_replays?.length ?? 0) > 0,
   },
+  // The original may be hidden from this viewer (blocked); keep the link, without a name.
+  replyTo: r.reply ? { reelId: r.reply.reply_to, username: r.reply.original?.creator?.username ?? '' } : null,
+  responses: r.responses?.[0]?.count ?? 0,
 });
 
 const toComment = (c: CommentRow): Comment => ({
@@ -175,6 +230,7 @@ const NOTIFICATION_TEXT: Record<Exclude<NotificationType, 'system' | 'comment'>,
   new_fan: 'became your Fan',
   mention: 'mentioned you in a Moment',
   replay: 'replayed your Moment',
+  response: 'responded to your Moment with one of theirs',
 };
 
 function notificationText(n: NotificationRow) {
@@ -218,6 +274,10 @@ function check<T>(res: Result<T>): T | null {
 function writeError(error: { code?: string; message: string }) {
   return error.code === 'GP429' ? new UserFacingError(error.message) : new Error(error.message);
 }
+
+/** PostgREST's "no such function": the ranking migration hasn't been applied to this database. */
+const isMissingFunction = (e: unknown) =>
+  typeof e === 'object' && e !== null && 'code' in e && (e as { code?: string }).code === 'PGRST202';
 
 /** List of rows (never null); throws on a request error. */
 function rowsOf<T>(res: Result<T[]>): T[] {
@@ -298,6 +358,51 @@ export function createSupabaseSource(
     };
   };
 
+  /**
+   * Hot Now / hashtag Top, ranked in the database (hot_reels). The cursor pins the moment the
+   * ranking was taken plus how far down you are, so pages never shift or repeat while you scroll.
+   * Null when the ranking functions aren't installed yet (the caller falls back to newest first).
+   */
+  const hotFeed = async (uid: string | null, hashtag: string | undefined, cursor: string | null): Promise<Page<Reel> | null> => {
+    // A little ahead of now, so a phone clock running slow doesn't hide a reel just posted.
+    const [asOf, from] = cursor ? cursor.split('|') : [new Date(Date.now() + 2 * 60_000).toISOString(), '0'];
+    const offset = Number(from) || 0;
+    let q = client
+      .rpc('hot_reels', {
+        p_as_of: asOf,
+        p_offset: offset,
+        p_limit: FEED_PAGE_SIZE,
+        p_hashtag: hashtag ? normalizeHashtag(hashtag) : null,
+      })
+      .select(REEL + (uid ? VIEWER : ''));
+    if (uid) q = q.eq('my_cheers.user_id', uid).eq('my_saves.user_id', uid).eq('my_replays.user_id', uid);
+    const res = await q.overrideTypes<ReelRow[], { merge: false }>();
+    // Not installed, or failing for any reason: newest first is better than no feed.
+    if (res.error) {
+      if (!isMissingFunction(res.error)) console.warn('hot_reels failed:', res.error.message);
+      return null;
+    }
+    const rows = rowsOf(res);
+    return {
+      items: rows.map(toReel),
+      nextCursor: rows.length === FEED_PAGE_SIZE ? `${asOf}|${offset + rows.length}` : null,
+    };
+  };
+
+  /** A challenge's entries, most Cheers first (challenge_reels); the cursor is an offset. */
+  const challengeFeed = async (uid: string | null, challengeId: string, cursor: string | null): Promise<Page<Reel>> => {
+    const offset = Number(cursor) || 0;
+    let q = client
+      .rpc('challenge_reels', { p_challenge: challengeId, p_offset: offset, p_limit: FEED_PAGE_SIZE })
+      .select(REEL + (uid ? VIEWER : ''));
+    if (uid) q = q.eq('my_cheers.user_id', uid).eq('my_saves.user_id', uid).eq('my_replays.user_id', uid);
+    const rows = rowsOf(await q.overrideTypes<ReelRow[], { merge: false }>());
+    return {
+      items: rows.map(toReel),
+      nextCursor: rows.length === FEED_PAGE_SIZE ? String(offset + rows.length) : null,
+    };
+  };
+
   const mutedIds = async (uid: string) =>
     rowsOf(
       await client
@@ -332,20 +437,30 @@ export function createSupabaseSource(
     async feed(filter, cursor) {
       const uid = await currentUserId();
       if (filter.saved) return savedFeed(uid, cursor);
-      // The main feed leaves out people you muted. (Blocked people's reels are hidden by the database.)
+      if (filter.challenge) return challengeFeed(uid, filter.challenge, cursor);
+      if (isRankedFeed(filter)) {
+        const ranked = await hotFeed(uid, filter.hashtag, cursor);
+        if (ranked) return ranked;
+      }
+      // Newest first. Only reached for Hot Now if the ranking migration isn't applied yet; then
+      // muted people are left out here instead. (Blocked people's reels are hidden by the database.)
       const isMainFeed = !filter.hashtag && !filter.username && !filter.club;
       // If the mute list can't be read, show the feed unfiltered rather than not at all.
       const muted = isMainFeed && uid ? await mutedIds(uid).catch(() => []) : [];
+      // A cursor left over from the ranked feed ("<time>|<offset>") means start again.
+      if (cursor?.includes('|')) cursor = null;
 
       const ownerColumns = [filter.username && 'username', filter.club && 'favorite_club'].filter(Boolean);
       let extra = '';
       if (filter.hashtag) extra += ', tagged:reel_hashtags!inner(tag)';
       if (ownerColumns.length) extra += `, owner:profiles!reels_user_id_fkey!inner(${ownerColumns.join(', ')})`;
+      if (filter.respondsTo) extra += ', responding:reel_replies!reel_replies_reel_id_fkey!inner(reply_to)';
 
       let q = reelQuery(uid, extra).eq('status', 'published');
       if (filter.hashtag) q = q.eq('tagged.tag', normalizeHashtag(filter.hashtag));
       if (filter.username) q = q.eq('owner.username', filter.username);
       if (filter.club) q = q.ilike('owner.favorite_club', clubPattern(filter.club));
+      if (filter.respondsTo) q = q.eq('responding.reply_to', filter.respondsTo);
       if (muted.length) q = q.not('user_id', 'in', `(${muted.join(',')})`);
       if (cursor) q = q.lt('published_at', cursor);
 
@@ -389,6 +504,10 @@ export function createSupabaseSource(
     },
 
     async trendingHashtags() {
+      const ranked = (await client.rpc('trending_hashtags', { p_limit: 20 })) as Result<HashtagRow[]>;
+      if (!isMissingFunction(ranked.error)) return rowsOf(ranked).map(toHashtag);
+
+      // Ranking migration not applied yet: most-used first.
       const rows = rowsOf(
         await client
           .from('hashtags')
@@ -595,6 +714,11 @@ export function createSupabaseSource(
       else await deleteEdge('blocks', { blocker_id: uid, blocked_id: userId });
     },
 
+    async notInterested(reelId) {
+      await requireUser();
+      await insertEdge('hidden_reels', { reel_id: reelId });
+    },
+
     async setMute(userId, on) {
       const uid = await requireUser();
       if (userId === uid) throw new UserFacingError("You can't mute yourself.");
@@ -659,6 +783,75 @@ export function createSupabaseSource(
 
     async recordShare(reelId) {
       await client.rpc('record_share', { p_reel_id: reelId });
+    },
+
+    async checkIn() {
+      if (!(await currentUserId())) return null;
+      const { data: result, error } = await client.rpc('pulse_check_in');
+      if (error) throw new Error(error.message);
+      return (result as CheckIn | null) ?? null;
+    },
+
+    async topFans(country) {
+      const res = (await client.rpc('pulse_top_fans', { p_country: country, p_limit: 50 })) as Result<FanStandingRow[]>;
+      return rowsOf(res).map((r) => ({
+        user: toUser(r),
+        weekPoints: Number(r.week_points),
+        position: Number(r.place),
+      }));
+    },
+
+    async myWeek() {
+      if (!(await currentUserId())) return null;
+      const { data: result, error } = await client.rpc('pulse_my_week');
+      if (error) throw new Error(error.message);
+      return (result as MyWeek | null) ?? null;
+    },
+
+    async clubWars() {
+      const res = (await client.rpc('club_wars', { p_limit: 50 })) as Result<ClubStandingRow[]>;
+      return rowsOf(res).map((r) => ({
+        club: r.club,
+        points: Number(r.points),
+        fans: Number(r.fans),
+        position: Number(r.place),
+      }));
+    },
+
+    async challenges() {
+      const now = new Date().toISOString();
+      const rows = rowsOf(
+        await client
+          .from('challenges')
+          .select(CHALLENGE)
+          .lte('starts_at', now)
+          .order('starts_at', { ascending: false })
+          .limit(2)
+          .overrideTypes<ChallengeRow[], { merge: false }>(),
+      );
+      const current = rows.find((c) => c.ends_at > now);
+      const previous = rows.find((c) => c.ends_at <= now);
+      return { current: current ? toChallenge(current) : null, previous: previous ? toChallenge(previous) : null };
+    },
+
+    async challenge(id) {
+      const row = check(await client.from('challenges').select(CHALLENGE).eq('id', id).maybeSingle<ChallengeRow>());
+      return row ? toChallenge(row) : null;
+    },
+
+    async linkResponse(reelId, replyTo) {
+      await requireUser();
+      await insertEdge('reel_replies', { reel_id: reelId, reply_to: replyTo });
+    },
+
+    async deleteAccount() {
+      await requireUser();
+      const { error } = await client.functions.invoke('account', { body: { action: 'delete' } });
+      if (error instanceof FunctionsHttpError) {
+        const payload = await (error.context as Response).json().catch(() => null);
+        throw new UserFacingError(payload?.error ?? "We couldn't delete your account. Try again.");
+      }
+      if (error) throw new Error(error.message);
     },
 
     async registerPushToken(token, platform) {

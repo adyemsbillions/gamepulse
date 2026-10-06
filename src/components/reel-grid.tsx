@@ -30,6 +30,9 @@ export function ReelGrid({ reels, filter = {} }: { reels: Reel[]; filter?: FeedF
                 username: filter.username,
                 club: filter.club,
                 saved: filter.saved ? '1' : undefined,
+                sort: filter.sort,
+                challenge: filter.challenge,
+                respondsTo: filter.respondsTo,
                 start: reel.id,
               },
             })

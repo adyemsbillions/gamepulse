@@ -1,6 +1,6 @@
 import { useVideoPlayer, VideoView, type VideoPlayer } from 'expo-video';
 import { router } from 'expo-router';
-import { Hash, Volume2, VolumeX, X } from 'lucide-react-native';
+import { Hash, Reply, Trophy, Volume2, VolumeX, X } from 'lucide-react-native';
 import { useMemo, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -53,7 +53,9 @@ function Header() {
 }
 
 function Composer({ video }: { video: PickedVideo }) {
-  const [caption, setCaption] = useState('');
+  // A challenge's hashtag or the Moment being responded to, from "Join challenge" / "Respond".
+  const [preset] = useState(() => draftVideo.getPreset());
+  const [caption, setCaption] = useState(preset?.caption ?? '');
   const input = useRef<TextInput>(null);
   const tags = useMemo(() => extractHashtags(caption), [caption]);
   const trending = useTrendingHashtags().data ?? [];
@@ -65,8 +67,9 @@ function Composer({ video }: { video: PickedVideo }) {
   };
 
   const post = () => {
-    uploads.post(video, caption.trim(), tags);
+    uploads.post(video, caption.trim(), tags, preset?.replyTo?.reelId ?? null);
     draftVideo.set(null);
+    draftVideo.setPreset(null);
     draftVideo.markPosted();
     // Back to the Create tab, which hands over to Profile (see create.tsx).
     router.back();
@@ -77,6 +80,14 @@ function Composer({ video }: { video: PickedVideo }) {
       <Header />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          {preset && (
+            <View style={styles.preset}>
+              {preset.replyTo ? <Reply size={16} color={Colors.primary} /> : <Trophy size={16} color={Colors.primary} />}
+              <AppText variant="bodyBold" color={Colors.primary} style={styles.flex}>
+                {preset.label}
+              </AppText>
+            </View>
+          )}
           <View style={styles.top}>
             <Preview video={video} />
             <View style={styles.captionBox}>
@@ -212,6 +223,14 @@ const styles = StyleSheet.create({
   },
   headerTitle: { flex: 1 },
   content: { padding: Spacing.three, gap: Spacing.four },
+  preset: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    padding: Spacing.three,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.surfaceMuted,
+  },
   top: { flexDirection: 'row', gap: Spacing.three, alignItems: 'flex-start' },
   preview: {
     width: PREVIEW_WIDTH,

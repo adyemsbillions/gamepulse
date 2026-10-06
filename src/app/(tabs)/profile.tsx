@@ -62,7 +62,12 @@ function accountMenu() {
     options: [
       { label: 'Edit profile', onPress: () => router.push('/edit-profile') },
       { label: 'Blocked accounts', onPress: () => router.push('/blocked') },
-      ...(isLive ? [{ label: 'Sign out', destructive: true, onPress: () => void signOut() }] : []),
+      ...(isLive
+        ? [
+            { label: 'Sign out', onPress: () => void signOut() },
+            { label: 'Delete account', destructive: true, onPress: () => router.push('/delete-account') },
+          ]
+        : []),
     ],
   });
 }

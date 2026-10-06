@@ -6,7 +6,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { AppText } from '@/components/ui/app-text';
 import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
-import { videoSource } from '@/lib/media';
+import { playbackUrl, videoBufferOptions, videoSource } from '@/lib/media';
 import type { Reel } from '@/lib/types';
 
 type Props = {
@@ -30,11 +30,29 @@ const SETTLE_MS = 600;
 /**
  * One player per mounted Reel. The feed only mounts this for the active Reel and its direct
  * neighbours, so the next Reel is buffered while the rest of the feed stays as posters.
+ * The poster shows until the stream (best quality up to 720p, see media.ts) has been chosen.
  */
-export function ReelVideo({ reel, playing, active, muted, bottomInset = 0, onReady }: Props) {
-  const player = useVideoPlayer(videoSource(reel.playbackUrl), (p) => {
+export function ReelVideo(props: Props) {
+  const source = props.reel.playbackUrl;
+  const [resolved, setResolved] = useState<{ from: string; url: string } | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    playbackUrl(source).then((url) => live && setResolved({ from: source, url }));
+    return () => {
+      live = false;
+    };
+  }, [source]);
+
+  if (!resolved || resolved.from !== source) return null;
+  return <Player {...props} url={resolved.url} />;
+}
+
+function Player({ reel, playing, active, muted, bottomInset = 0, onReady, url }: Props & { url: string }) {
+  const player = useVideoPlayer(videoSource(url), (p) => {
     p.loop = true;
     p.timeUpdateEventInterval = 0.25;
+    p.bufferOptions = videoBufferOptions;
   });
 
   const { status } = useEvent(player, 'statusChange', { status: player.status });

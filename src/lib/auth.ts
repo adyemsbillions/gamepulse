@@ -93,6 +93,11 @@ export async function signOut() {
   await supabase?.auth.signOut();
 }
 
+/** After the account was deleted on the server: forget the session on this device. */
+export async function forgetDeletedAccount() {
+  await supabase?.auth.signOut({ scope: 'local' }).catch(() => {});
+}
+
 /**
  * For actions that need an account (cheer, comment, support, post…). Returns true when signed
  * in; otherwise opens the sign-in sheet and returns false.
