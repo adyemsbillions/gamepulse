@@ -1,0 +1,50 @@
+:root {
+  --royal: #0e2f76;
+  --deep: #081d4d;
+  --ice: #f4feff;
+  --powder: #a9c0e0;
+  --volt: #c6ff3d;
+  --text: #0b1b3f;
+  --muted: #5b6b8a;
+  --border: #d3dfee;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: 'Poppins', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: var(--text);
+  background: var(--ice);
+  line-height: 1.65;
+}
+header {
+  background: linear-gradient(135deg, var(--royal), var(--deep));
+  color: var(--ice);
+  padding: 28px 16px 36px;
+}
+header .wrap, main, footer .wrap { max-width: 760px; margin: 0 auto; }
+.brand { display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--ice); }
+.brand svg { width: 44px; height: 44px; flex-shrink: 0; }
+.brand b { font-size: 22px; letter-spacing: 3px; font-weight: 800; }
+.brand b span { color: var(--volt); }
+header h1 { margin: 22px 0 4px; font-size: 32px; line-height: 1.2; }
+header p { margin: 0; color: var(--powder); }
+nav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+nav a {
+  color: var(--ice); text-decoration: none; font-size: 14px; font-weight: 600;
+  padding: 6px 14px; border: 1px solid rgba(169, 192, 224, 0.4); border-radius: 999px;
+}
+nav a.on { background: var(--volt); color: var(--deep); border-color: var(--volt); }
+main { padding: 28px 16px 48px; }
+h2 { font-size: 22px; margin: 36px 0 8px; color: var(--royal); }
+h3 { font-size: 17px; margin: 24px 0 6px; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px; border-bottom: 1px solid var(--border); }
+th { background: #e6eef8; }
+.note { background: #e6eef8; border-left: 4px solid var(--royal); padding: 12px 16px; border-radius: 8px; }
+.steps li { margin-bottom: 8px; }
+a { color: var(--royal); }
+footer { border-top: 1px solid var(--border); padding: 20px 16px; color: var(--muted); font-size: 13px; }
+@media (max-width: 600px) {
+  header h1 { font-size: 26px; }
+  table { display: block; overflow-x: auto; }
+}
