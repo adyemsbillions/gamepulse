@@ -17,6 +17,9 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
+# Play upload key, downloaded with `eas credentials` (signs every release; never commit).
+credentials.json
+credentials/
 # Firebase service account private keys (push). google-services.json itself is fine to commit.
 *firebase-adminsdk*.json
 service-account*.json

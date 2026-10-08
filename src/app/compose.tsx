@@ -184,8 +184,17 @@ function Preview({ video }: { video: PickedVideo }) {
   const ratio = video.width > 0 && video.height > 0 ? video.width / video.height : 9 / 16;
 
   return (
-    <View style={[styles.preview, { aspectRatio: Math.min(Math.max(ratio, 9 / 16), 1) }]}>
-      <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} />
+    // Explicit height rather than aspectRatio, which can lay out at zero height on Android.
+    <View style={[styles.preview, { height: Math.round(PREVIEW_WIDTH / Math.min(Math.max(ratio, 9 / 16), 1)) }]}>
+      {/* textureView: Android's default surface is drawn in its own layer and showed through
+          screens opened on top of this one (it floated over the comments sheet). */}
+      <VideoView
+        player={player}
+        style={StyleSheet.absoluteFill}
+        contentFit="cover"
+        nativeControls={false}
+        surfaceType="textureView"
+      />
       <Pressable
         accessibilityLabel={muted ? 'Play sound' : 'Mute'}
         hitSlop={8}

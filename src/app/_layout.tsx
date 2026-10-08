@@ -17,6 +17,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { AnimatedSplash } from '@/components/brand/animated-splash';
 import { ActionSheetHost } from '@/components/ui/action-sheet';
+import { DownloadHost } from '@/components/download-host';
 import { ToastHost } from '@/components/ui/toast';
 import { UpdatePrompt } from '@/components/update-prompt';
 import { Colors } from '@/constants/theme';
@@ -69,6 +70,7 @@ export default function RootLayout() {
       </Stack>
       <AuthGate />
       <ActionSheetHost />
+      <DownloadHost />
       <ToastHost />
       <UpdatePrompt />
       {/* Takes over from the native splash (it hides it on first layout), then fades out. */}

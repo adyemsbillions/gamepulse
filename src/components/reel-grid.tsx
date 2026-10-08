@@ -15,13 +15,17 @@ const GAP = 2;
 /** 3-column poster grid. Tapping opens the vertical feed scoped to the same list. */
 export function ReelGrid({ reels, filter = {} }: { reels: Reel[]; filter?: FeedFilter }) {
   const cellWidth = Math.floor((useWindowDimensions().width - GAP * 2) / 3);
+  // An explicit height, not aspectRatio: in a wrapping row the layout engine could resolve
+  // aspectRatio to a zero height, which left the grid blank on Android.
+  const cellHeight = Math.round((cellWidth * 16) / 9);
   return (
     <View style={styles.grid}>
       {reels.map((reel) => (
         <Pressable
           key={reel.id}
-          accessibilityLabel={reel.caption}
-          style={[styles.cell, { width: cellWidth }]}
+          accessibilityRole="button"
+          accessibilityLabel={reel.caption || 'Moment'}
+          style={[styles.cell, { width: cellWidth, height: cellHeight }]}
           onPress={() =>
             router.push({
               pathname: '/feed',
@@ -51,9 +55,9 @@ export function ReelGrid({ reels, filter = {} }: { reels: Reel[]; filter?: FeedF
 }
 
 const styles = StyleSheet.create({
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GAP },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-start', gap: GAP },
   cell: {
-    aspectRatio: 9 / 16,
+    overflow: 'hidden',
     backgroundColor: Colors.surfaceMuted,
   },
   views: {
@@ -63,5 +67,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
   },
 });

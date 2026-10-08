@@ -51,7 +51,9 @@ const CHALLENGE = `id, tag, title, description, emoji, starts_at, ends_at, winne
 /** Signed-in only: the viewer's own cheer/save/replay rows, filtered to them in `reelQuery`. */
 const VIEWER = `, my_cheers:cheers(user_id), my_saves:saves(user_id), my_replays:replays(user_id)`;
 
+// media_* come from 20261008100000_comment_media.sql; apply it before shipping this.
 const COMMENT = `id, reel_id, user_id, parent_id, body, cheers_count, created_at,
+  media_kind, media_url, media_width, media_height,
   author:profiles!comments_user_id_fkey(${PROFILE})`;
 
 type ProfileRow = {
@@ -122,8 +124,14 @@ type CommentRow = {
   body: string;
   cheers_count: number;
   created_at: string;
+  media_kind?: 'sticker' | 'gif' | null;
+  media_url?: string | null;
+  media_width?: number | null;
+  media_height?: number | null;
   author: ProfileRow;
 };
+
+type StickerRow = { media_kind: 'sticker' | 'gif'; media_url: string; media_width: number | null; media_height: number | null };
 
 type NotificationRow = {
   id: string;
@@ -206,6 +214,10 @@ const toComment = (c: CommentRow): Comment => ({
   cheers: c.cheers_count,
   createdAt: c.created_at,
   author: toUser(c.author),
+  media:
+    c.media_kind && c.media_url
+      ? { kind: c.media_kind, url: c.media_url, width: c.media_width ?? null, height: c.media_height ?? null }
+      : null,
 });
 
 const PROFILE_COLUMNS: Record<keyof ProfilePatch, string> = {
@@ -307,7 +319,7 @@ export function createSupabaseSource(
   };
 
   /** Insert a (user, target) row; a duplicate means it's already on, which is fine. */
-  const insertEdge = async (table: string, row: Record<string, string>) => {
+  const insertEdge = async (table: string, row: Record<string, string | number | null>) => {
     const { error } = await client.from(table).insert(row);
     if (error && error.code !== '23505') throw writeError(error);
   };
@@ -442,9 +454,23 @@ export function createSupabaseSource(
         const ranked = await hotFeed(uid, filter.hashtag, cursor);
         if (ranked) return ranked;
       }
+      // Supporting: everyone you support (nothing to show when signed out or supporting nobody).
+      let supported: string[] = [];
+      if (filter.supporting) {
+        if (!uid) return { items: [], nextCursor: null };
+        supported = rowsOf(
+          await client
+            .from('supports')
+            .select('creator_id')
+            .eq('supporter_id', uid)
+            .overrideTypes<{ creator_id: string }[], { merge: false }>(),
+        ).map((r) => r.creator_id);
+        if (supported.length === 0) return { items: [], nextCursor: null };
+      }
+
       // Newest first. Only reached for Hot Now if the ranking migration isn't applied yet; then
       // muted people are left out here instead. (Blocked people's reels are hidden by the database.)
-      const isMainFeed = !filter.hashtag && !filter.username && !filter.club;
+      const isMainFeed = !filter.hashtag && !filter.username && !filter.club && !filter.supporting;
       // If the mute list can't be read, show the feed unfiltered rather than not at all.
       const muted = isMainFeed && uid ? await mutedIds(uid).catch(() => []) : [];
       // A cursor left over from the ranked feed ("<time>|<offset>") means start again.
@@ -461,6 +487,7 @@ export function createSupabaseSource(
       if (filter.username) q = q.eq('owner.username', filter.username);
       if (filter.club) q = q.ilike('owner.favorite_club', clubPattern(filter.club));
       if (filter.respondsTo) q = q.eq('responding.reply_to', filter.respondsTo);
+      if (supported.length) q = q.in('user_id', supported);
       if (muted.length) q = q.not('user_id', 'in', `(${muted.join(',')})`);
       if (cursor) q = q.lt('published_at', cursor);
 
@@ -726,17 +753,54 @@ export function createSupabaseSource(
       else await deleteEdge('mutes', { muter_id: uid, muted_id: userId });
     },
 
-    async addComment(reelId, body, parentId = null) {
+    async addComment(reelId, body, parentId = null, media = null) {
       await requireUser();
       const text = body.trim();
-      if (!text) throw new UserFacingError('Write something first.');
+      if (!text && !media) throw new UserFacingError('Write something first.');
       const { data: row, error } = await client
         .from('comments')
-        .insert({ reel_id: reelId, body: text, parent_id: parentId })
+        .insert({
+          reel_id: reelId,
+          body: text,
+          parent_id: parentId,
+          ...(media
+            ? {
+                media_kind: media.kind,
+                media_url: media.url,
+                media_width: media.width ?? null,
+                media_height: media.height ?? null,
+              }
+            : {}),
+        })
         .select(COMMENT)
         .single<CommentRow>();
       if (error) throw writeError(error);
       return toComment(row);
+    },
+
+    async savedStickers() {
+      const uid = await currentUserId();
+      if (!uid) return [];
+      const rows = rowsOf(
+        await client
+          .from('saved_stickers')
+          .select('media_kind, media_url, media_width, media_height')
+          .order('created_at', { ascending: false })
+          .overrideTypes<StickerRow[], { merge: false }>(),
+      );
+      return rows.map((r) => ({ kind: r.media_kind, url: r.media_url, width: r.media_width, height: r.media_height }));
+    },
+
+    async setSavedSticker(media, on) {
+      const uid = await requireUser();
+      if (on)
+        await insertEdge('saved_stickers', {
+          media_kind: media.kind,
+          media_url: media.url,
+          media_width: media.width ?? null,
+          media_height: media.height ?? null,
+        });
+      else await deleteEdge('saved_stickers', { user_id: uid, media_url: media.url });
     },
 
     async markNotificationsRead() {
@@ -872,7 +936,8 @@ export function createSupabaseSource(
 
     async uploadStatus(reelId) {
       await requireUser();
-      return (await videos<{ status: ReelStatus }>({ action: 'refresh', reelId })).status;
+      const res = await videos<{ status: ReelStatus; progress?: number | null }>({ action: 'refresh', reelId });
+      return { status: res.status, progress: typeof res.progress === 'number' ? res.progress : null };
     },
 
     async deleteReel(reelId) {

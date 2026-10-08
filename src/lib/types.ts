@@ -113,7 +113,15 @@ export type CommentRecord = {
   createdAt: string;
 };
 
-export type Comment = CommentRecord & { author: User };
+/** A sticker (GamePulse pack, `gp:<id>`) or a GIF (GIPHY URL) attached to a comment. */
+export type CommentMedia = {
+  kind: 'sticker' | 'gif';
+  url: string;
+  width?: number | null;
+  height?: number | null;
+};
+
+export type Comment = CommentRecord & { author: User; media?: CommentMedia | null };
 
 export type Hashtag = {
   name: string;

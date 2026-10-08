@@ -125,7 +125,7 @@ One-time setup:
 5. In the library settings, set **Webhook URL** to `https://<project-ref>.supabase.co/functions/v1/videos/webhook`.
    Optional: the app also polls, so uploads still publish without it (just a little slower).
 
-Limits (in `supabase/functions/videos/handler.ts`): 60 s, 300 MB, 20 uploads per user per day,
+Limits (in `supabase/functions/videos/handler.ts`, mirrored in `src/lib/data/source.ts`): 3 minutes, 500 MB, 20 uploads per user per day,
 10 hashtags. Bunny's own reported length is checked after encoding, so a longer clip is rejected
 even if a modified app skips the check.
 
@@ -198,6 +198,16 @@ Migrations `20261007100000_response_notification.sql` + `20261007100100_challeng
   Pulse. Reels show "Responding to @x" and "N responses".
 
 After changing the push wording, redeploy: `npx supabase functions deploy push --no-verify-jwt --use-api`.
+
+## Stickers and GIFs in comments
+
+Migration `20261008100000_comment_media.sql`. A comment can carry one sticker or GIF (text becomes
+optional). Sources, checked by the database: GamePulse's own pack (`gp:<id>`, drawn in
+`src/components/stickers.tsx`), and GIPHY stickers and GIFs (`media*.giphy.com/media/…`).
+Long-press any sticker or GIF in the comments to keep it in **My stickers** (`saved_stickers`,
+300 max). GIPHY needs `EXPO_PUBLIC_GIPHY_KEY` in `.env.local` (developers.giphy.com → Create an
+App → API); without it only the GamePulse pack shows. A GIPHY beta key allows 100 searches an
+hour across all users; apply for a production key (free) before launch.
 
 ## Block, mute and rate limits
 

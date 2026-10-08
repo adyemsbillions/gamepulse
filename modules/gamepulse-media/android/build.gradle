@@ -1,0 +1,33 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.gamepulsemedia'
+version = '1.0.0'
+
+expoModule {
+  canBePublished false
+}
+
+// Same Media3 version expo-video ships, so there's one copy of the player/codec stack.
+def media3Version = "1.9.0"
+
+android {
+  namespace "expo.modules.gamepulsemedia"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+  // Transformer, effects and overlays are marked @UnstableApi; we pin the version (above), so
+  // opting in is deliberate. Without this, the release lint check stops the build.
+  lint {
+    disable 'UnsafeOptInUsageError'
+  }
+}
+
+dependencies {
+  implementation "androidx.media3:media3-common:${media3Version}"
+  implementation "androidx.media3:media3-effect:${media3Version}"
+  implementation "androidx.media3:media3-transformer:${media3Version}"
+}

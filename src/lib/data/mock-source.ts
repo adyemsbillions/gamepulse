@@ -4,7 +4,7 @@
  */
 import * as mock from '../mock-data';
 import { weekEndsAt } from '../pulse';
-import type { Challenge, Comment, Reel, ReelRecord, User } from '../types';
+import type { Challenge, Comment, CommentMedia, Reel, ReelRecord, User } from '../types';
 
 import { FEED_PAGE_SIZE, normalizeHashtag, rankClubs, type DataSource, type FeedFilter } from './source';
 
@@ -12,6 +12,7 @@ const sameClub = (a: string, b: string) => a.trim().toLowerCase() === b.trim().t
 
 const mockPulse = { checkedIn: '', streak: 2 };
 const mockReplies = new Map<string, string>();
+const mockStickers = new Map<string, CommentMedia>();
 
 /** A challenge that's always running in sample mode, ending next Monday. */
 function mockChallenge(): Challenge {
@@ -67,6 +68,8 @@ function filterFeed(filter: FeedFilter): ReelRecord[] {
   let list = mock.reels.filter((r) => r.status === 'published' && !mine.blocked.has(r.userId));
   if (filter.saved) return list.filter((r) => mine.saves.has(r.id));
   if (filter.respondsTo) return list.filter((r) => mockReplies.get(r.id) === filter.respondsTo);
+  if (filter.supporting)
+    return list.filter((r) => mine.supports.has(r.userId)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   if (filter.challenge) {
     const tag = mockChallenge().tag;
     return list.filter((r) => r.hashtags.includes(tag)).sort((a, b) => b.cheers - a.cheers);
@@ -209,7 +212,16 @@ export const mockSource: DataSource = {
     toggle(mine.supports, creatorId, on);
   },
 
-  async addComment(reelId, body, parentId = null) {
+  async savedStickers() {
+    return [...mockStickers.values()];
+  },
+
+  async setSavedSticker(media, on) {
+    if (on) mockStickers.set(media.url, media);
+    else mockStickers.delete(media.url);
+  },
+
+  async addComment(reelId, body, parentId = null, media = null) {
     const record = {
       id: `local_${Date.now()}`,
       reelId,
@@ -222,7 +234,7 @@ export const mockSource: DataSource = {
     mock.comments.unshift(record);
     const reel = mock.reels.find((r) => r.id === reelId);
     if (reel) reel.comments += 1;
-    return { ...record, author: usersById.get(mock.CURRENT_USER_ID)! };
+    return { ...record, media, author: usersById.get(mock.CURRENT_USER_ID)! };
   },
 
   async markNotificationsRead() {
@@ -330,9 +342,9 @@ export const mockSource: DataSource = {
 
   async uploadStatus(reelId) {
     const reel = mock.reels.find((r) => r.id === reelId);
-    if (!reel) return 'failed';
+    if (!reel) return { status: 'failed', progress: null };
     if (reel.status === 'processing') reel.status = 'published';
-    return reel.status;
+    return { status: reel.status, progress: null };
   },
 
   async deleteReel(reelId) {

@@ -11,6 +11,7 @@ import { Platform } from 'react-native';
 import { Upload } from 'tus-js-client';
 
 import { data } from './api';
+import { compressForUpload, mediaToolsAvailable, onMediaProgress } from './media-tools';
 import { UserFacingError, type UploadTicket } from './data/source';
 import { keys, queryClient } from './queries';
 import type { ReplyTarget } from './types';
@@ -26,7 +27,7 @@ export type PickedVideo = {
   file?: Blob;
 };
 
-export type UploadPhase = 'preparing' | 'uploading' | 'processing' | 'published' | 'failed';
+export type UploadPhase = 'compressing' | 'preparing' | 'uploading' | 'processing' | 'published' | 'failed';
 
 export type UploadJob = {
   id: string;
@@ -42,9 +43,20 @@ export type UploadJob = {
   error: string | null;
   /** Encoding is taking longer than we poll for; it'll still publish on its own. */
   slow: boolean;
+  /** The video host's encoding % while processing, when it reports one. */
+  encoding?: number | null;
 };
 
-type Internal = { ticket: UploadTicket | null; ticketExpires: number; upload: Upload | null; cancelled: boolean };
+type Internal = {
+  ticket: UploadTicket | null;
+  ticketExpires: number;
+  upload: Upload | null;
+  cancelled: boolean;
+  /** The file actually uploaded: the 720p copy when compression worked, else the original. */
+  uploadUri?: string;
+  /** Compression was tried (once per job; retries reuse the result). */
+  compressed?: boolean;
+};
 
 let jobs: UploadJob[] = [];
 const internals = new Map<string, Internal>();
@@ -140,7 +152,7 @@ export const uploads = {
     emit();
   },
 
-  isBusy: () => jobs.some((j) => j.phase === 'preparing' || j.phase === 'uploading'),
+  isBusy: () => jobs.some((j) => j.phase === 'compressing' || j.phase === 'preparing' || j.phase === 'uploading'),
 };
 
 async function run(id: string) {
@@ -149,6 +161,18 @@ async function run(id: string) {
   if (!internal || !job) return;
 
   try {
+    // Shrink to 720p first (Android build with the media module): a fraction of the size, so it
+    // uploads several times faster and Bunny encodes it sooner. Never blocks posting.
+    if (!internal.compressed && mediaToolsAvailable && Platform.OS === 'android') {
+      patch(id, { phase: 'compressing', progress: 0 });
+      const stop = onMediaProgress(id, (stage, p) => stage === 'compressing' && patch(id, { progress: p }));
+      const small = await compressForUpload(job.video.uri, id);
+      stop();
+      internal.compressed = true;
+      internal.uploadUri = small ?? job.video.uri;
+      if (internal.cancelled) return;
+    }
+
     // Reuse the reel and signed upload from a failed attempt while it's still valid, so TUS can
     // resume where it stopped instead of starting a second reel.
     let ticket = internal.ticket;
@@ -159,8 +183,9 @@ async function run(id: string) {
         caption: job.caption,
         tags: job.tags,
         durationSec: job.video.durationSec,
-        fileType: job.video.mimeType,
-        fileSize: job.video.fileSize,
+        fileType: internal.uploadUri && internal.uploadUri !== job.video.uri ? 'video/mp4' : job.video.mimeType,
+        // The compressed copy's size isn't known here; the server only needs it to refuse huge files.
+        fileSize: internal.uploadUri && internal.uploadUri !== job.video.uri ? null : job.video.fileSize,
         localUri: job.video.uri,
       });
       internal.ticket = ticket;
@@ -174,12 +199,13 @@ async function run(id: string) {
     if (internal.cancelled) return;
     patch(id, { reelId: ticket.reelId, phase: 'uploading' });
 
-    if (ticket.upload) await sendFile(id, internal, job.video, ticket.upload);
+    const toSend = internal.uploadUri ? { ...job.video, uri: internal.uploadUri } : job.video;
+    if (ticket.upload) await sendFile(id, internal, toSend, ticket.upload);
     else await simulateUpload(id);
     if (internal.cancelled) return;
 
-    patch(id, { phase: 'processing', progress: 1 });
-    const status = await waitUntilPublished(ticket.reelId, internal);
+    patch(id, { phase: 'processing', progress: 1, encoding: null });
+    const status = await waitUntilPublished(ticket.reelId, internal, (encoding) => patch(id, { encoding }));
     if (internal.cancelled) return;
 
     if (status === 'published') {
@@ -224,7 +250,8 @@ function sendFile(
       chunkSize: 8 * 1024 * 1024,
       retryDelays: [0, 2_000, 5_000, 10_000, 20_000, 30_000, 60_000],
       storeFingerprintForResuming: false,
-      onProgress: (sent, total) => patch(id, { progress: total > 0 ? sent / total : 0 }),
+      // tus can report a little past the total (resumed chunks, size rounding); never show >100%.
+      onProgress: (sent, total) => patch(id, { progress: total > 0 ? Math.min(sent / total, 1) : 0 }),
       onSuccess: () => resolve(),
       onError: (err) => reject(err),
     });
@@ -240,14 +267,18 @@ async function simulateUpload(id: string) {
   }
 }
 
-/** Poll the host until the reel is published or failed (about 15 minutes at most). */
-async function waitUntilPublished(reelId: string, internal: Internal) {
+/**
+ * Poll the host until the reel is published or failed (about 30 minutes at most; a 3-minute clip
+ * can take a while to encode). Reports the host's encoding % as it goes.
+ */
+async function waitUntilPublished(reelId: string, internal: Internal, onEncoding: (percent: number | null) => void) {
   const started = Date.now();
   let delay = 3_000;
-  while (!internal.cancelled && Date.now() - started < 15 * 60_000) {
+  while (!internal.cancelled && Date.now() - started < 30 * 60_000) {
     try {
-      const status = await data.uploadStatus(reelId);
+      const { status, progress } = await data.uploadStatus(reelId);
       if (status === 'published' || status === 'failed' || status === 'removed') return status;
+      onEncoding(progress);
     } catch {
       // Transient; keep polling.
     }

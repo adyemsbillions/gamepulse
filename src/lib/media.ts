@@ -1,4 +1,5 @@
 import type { ImageSource } from 'expo-image';
+import * as Network from 'expo-network';
 import type { VideoSource } from 'expo-video';
 import { Platform } from 'react-native';
 
@@ -23,28 +24,44 @@ export const imageSource = (uri: string): ImageSource | null => (uri ? { uri, he
 
 // ---------------------------------------------------------------- picking the quality
 
-/** Sharp on a phone screen at about 2.5 Mbps; 1080p costs 6–7 Mbps for little visible gain. */
-const TARGET_SHORT_SIDE = 720;
+/**
+ * Sharp on a phone screen at about 2.5 Mbps; 1080p costs 6–7 Mbps for little visible gain.
+ * Data saver: on mobile data, 480p (about 1.4 Mbps), roughly half the data and the CDN bill.
+ */
+const WIFI_SHORT_SIDE = 720;
+const CELLULAR_SHORT_SIDE = 480;
+
+let onCellular = false;
+try {
+  // expo-network ships in the 1.1.0 build; older builds never get this code (runtime version).
+  const apply = (s: { type?: Network.NetworkStateType }) => void (onCellular = s.type === Network.NetworkStateType.CELLULAR);
+  Network.getNetworkStateAsync().then(apply, () => {});
+  Network.addNetworkStateListener(apply);
+} catch {
+  // No network info: always aim for 720p.
+}
 
 const chosen = new Map<string, Promise<string>>();
 
 /**
  * The stream to play for a video. Bunny's HLS playlist lists 360p first, and the player starts on
  * the first entry and rarely climbs before a short clip ends, so Moments looked soft. Instead we
- * read the list and play the best quality up to 720p directly. Anything unexpected (not HLS,
+ * read the list and play the best quality up to 720p (480p on mobile data) directly. Anything unexpected (not HLS,
  * offline, odd playlist) falls back to the original URL, which plays as before.
  */
 export function playbackUrl(masterUrl: string): Promise<string> {
   if (Platform.OS === 'web' || !masterUrl.endsWith('.m3u8')) return Promise.resolve(masterUrl);
-  let pending = chosen.get(masterUrl);
+  const target = onCellular ? CELLULAR_SHORT_SIDE : WIFI_SHORT_SIDE;
+  const key = `${target}:${masterUrl}`;
+  let pending = chosen.get(key);
   if (!pending) {
-    pending = pickRendition(masterUrl).catch(() => masterUrl);
-    chosen.set(masterUrl, pending);
+    pending = pickRendition(masterUrl, target).catch(() => masterUrl);
+    chosen.set(key, pending);
   }
   return pending;
 }
 
-async function pickRendition(masterUrl: string): Promise<string> {
+async function pickRendition(masterUrl: string, targetShortSide: number): Promise<string> {
   const res = await fetch(masterUrl, { headers: HEADERS });
   if (!res.ok) return masterUrl;
   const lines = (await res.text()).split(/\r?\n/);
@@ -57,9 +74,9 @@ async function pickRendition(masterUrl: string): Promise<string> {
     if (!lines[i].startsWith('#EXT-X-STREAM-INF') || !match || !uri || uri.startsWith('#')) continue;
     const side = Math.min(Number(match[1]), Number(match[2]));
     const url = new URL(uri, masterUrl).toString();
-    if (side <= TARGET_SHORT_SIDE && (!best || side > best.side)) best = { url, side };
+    if (side <= targetShortSide && (!best || side > best.side)) best = { url, side };
     if (!fallback || side < fallback.side) fallback = { url, side };
   }
-  // Nothing at or under 720p (unusual): the smallest one is still better than guessing.
+  // Nothing at or under the target (unusual): the smallest one is still better than guessing.
   return best?.url ?? fallback?.url ?? masterUrl;
 }

@@ -15,7 +15,7 @@ import { AppState, Platform } from 'react-native';
 
 import { data, type FeedFilter } from './api';
 import type { ReportReason } from './data/source';
-import type { LocalImage, Page, ProfilePatch, Reel, User } from './types';
+import type { CommentMedia, LocalImage, Page, ProfilePatch, Reel, User } from './types';
 import { useSessionUserId } from './session';
 
 export const queryClient = new QueryClient({
@@ -36,7 +36,9 @@ export const keys = {
   feed: (filter: FeedFilter, uid: string | null | undefined) =>
     filter.saved
       ? (['feed', 'saved', uid ?? null] as const)
-      : ([
+      : filter.supporting
+        ? (['feed', 'supporting', uid ?? null] as const)
+        : ([
           'feed',
           'public',
           filter.hashtag ?? null,
@@ -47,8 +49,10 @@ export const keys = {
           filter.respondsTo ?? null,
         ] as const),
   challenges: ['challenges'] as const,
+  savedStickers: (uid: string | null | undefined) => ['saved-stickers', uid ?? null] as const,
   challenge: (id: string) => ['challenges', id] as const,
   savedFeed: ['feed', 'saved'] as const,
+  supportingFeed: ['feed', 'supporting'] as const,
   clubFans: (club: string) => ['club-fans', club.toLowerCase()] as const,
   clubWars: ['pulse', 'clubs'] as const,
   topFans: (country: string | null) => ['pulse', 'fans', country] as const,
@@ -75,8 +79,8 @@ export function useFeed(filter: FeedFilter = {}, { enabled = true }: { enabled?:
     queryFn: ({ pageParam }) => data.feed(filter, pageParam),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextCursor,
-    // Saved reels belong to whoever is signed in; wait until we know who that is.
-    enabled: enabled && (!filter.saved || uid !== undefined),
+    // Saved and Supporting belong to whoever is signed in; wait until we know who that is.
+    enabled: enabled && ((!filter.saved && !filter.supporting) || uid !== undefined),
   });
   // A reel can land on two pages if the ranking shifted between them; show it once.
   const reels = useMemo(() => {
@@ -210,12 +214,30 @@ export function useUsernameAvailable(name: string, enabled: boolean) {
 
 export function useAddComment(reelId: string) {
   return useMutation({
-    mutationFn: (body: string) => data.addComment(reelId, body),
+    mutationFn: ({ body, media = null }: { body: string; media?: CommentMedia | null }) =>
+      data.addComment(reelId, body, null, media),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: keys.comments(reelId) });
       queryClient.invalidateQueries({ queryKey: keys.reel(reelId) });
       queryClient.invalidateQueries({ queryKey: ['feed'] });
     },
+  });
+}
+
+/** "My stickers": stickers and GIFs the signed-in user saved. */
+export function useSavedStickers(enabled = true) {
+  const uid = useSessionUserId();
+  return useQuery({
+    queryKey: keys.savedStickers(uid),
+    queryFn: () => data.savedStickers(),
+    enabled: enabled && !!uid,
+  });
+}
+
+export function useSetSavedSticker() {
+  return useMutation({
+    mutationFn: ({ media, on }: { media: CommentMedia; on: boolean }) => data.setSavedSticker(media, on),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['saved-stickers'] }),
   });
 }
 

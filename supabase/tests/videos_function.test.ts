@@ -116,10 +116,10 @@ async function main() {
   expect('not onboarded → 403', r.status === 403 && /profile/.test(r.body.error), r);
   r = await call({ action: 'nope' }, A);
   expect('unknown action → 400', r.status === 400, r);
-  r = await call({ action: 'create', caption: 'long', durationSec: 95 }, A);
-  expect('over 60 s refused before anything is created', r.status === 400 && videos.size === 0, r);
-  r = await call({ action: 'create', caption: 'big', fileSize: 400 * 1024 * 1024 }, A);
-  expect('over 300 MB refused', r.status === 400, r);
+  r = await call({ action: 'create', caption: 'long', durationSec: LIMITS.maxDurationSec + 30 }, A);
+  expect('over the length limit refused before anything is created', r.status === 400 && videos.size === 0, r);
+  r = await call({ action: 'create', caption: 'big', fileSize: LIMITS.maxFileBytes + 1 }, A);
+  expect('over the size limit refused', r.status === 400, r);
 
   // ---- create
   r = await call(
@@ -160,7 +160,7 @@ async function main() {
   expect('bad id → 404', r.status === 404, r);
 
   // ---- webhook
-  videos.get(guid)!.status = 3;
+  videos.get(guid)!.status = 4; // Get Video: Finished
   videos.get(guid)!.length = 14;
   r = await hook({ VideoLibraryId: 777, VideoGuid: guid, Status: 3 }, 'wrong-key');
   expect('webhook with bad signature → 401, nothing changes', r.status === 401 && (await reelRow(reelId))?.status === 'processing', r);
@@ -190,15 +190,15 @@ async function main() {
 
   // Late webhook after a moderator removed the reel doesn't bring it back.
   await service.from('reels').update({ status: 'removed' }).eq('id', second);
-  videos.get(guid2)!.status = 3;
+  videos.get(guid2)!.status = 4;
   r = await hook({ VideoLibraryId: 777, VideoGuid: guid2, Status: 3 });
   expect('removed reel stays removed', r.body.status === 'removed' && (await reelRow(second))?.status === 'removed', r);
 
-  // Longer than 60 s once encoded → failed and deleted from Bunny.
+  // Longer than the limit once encoded → failed and deleted from Bunny.
   r = await call({ action: 'create', caption: 'sneaky long', durationSec: 20 }, A);
   const third = r.body.reelId;
   const guid3 = r.body.upload.headers.VideoId;
-  Object.assign(videos.get(guid3)!, { status: 3, length: 180 });
+  Object.assign(videos.get(guid3)!, { status: 4, length: LIMITS.maxDurationSec + 60 });
   r = await hook({ VideoLibraryId: 777, VideoGuid: guid3, Status: 3 });
   expect('too-long video → failed', r.body.status === 'failed', r);
   expect('too-long video deleted from Bunny', !videos.has(guid3));

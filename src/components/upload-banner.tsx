@@ -31,7 +31,11 @@ export function UploadBanner() {
 
   if (!job) return null;
   const { title, detail } = describe(job);
-  const inFlight = job.phase === 'preparing' || job.phase === 'uploading' || (job.phase === 'processing' && !job.slow);
+  const inFlight =
+    job.phase === 'compressing' ||
+    job.phase === 'preparing' ||
+    job.phase === 'uploading' ||
+    (job.phase === 'processing' && !job.slow);
 
   const view = () => {
     if (!job.reelId) return;
@@ -95,9 +99,9 @@ export function UploadBanner() {
           </Pressable>
         )}
 
-        {(job.phase === 'uploading' || job.phase === 'preparing') && (
+        {(job.phase === 'uploading' || job.phase === 'preparing' || job.phase === 'compressing') && (
           <View style={styles.track}>
-            <View style={[styles.fill, { width: `${Math.round(job.progress * 100)}%` }]} />
+            <View style={[styles.fill, { width: `${percent(job.progress)}%` }]} />
           </View>
         )}
       </View>
@@ -105,17 +109,24 @@ export function UploadBanner() {
   );
 }
 
+const percent = (progress: number) => Math.round(Math.min(Math.max(progress, 0), 1) * 100);
+
 function describe(job: UploadJob): { title: string; detail: string } {
   const caption = job.caption || 'Your Moment';
   switch (job.phase) {
+    case 'compressing':
+      return { title: `Preparing video · ${percent(job.progress)}%`, detail: 'Making it smaller so it posts faster.' };
     case 'preparing':
       return { title: 'Getting ready…', detail: caption };
     case 'uploading':
-      return { title: `Posting · ${Math.round(job.progress * 100)}%`, detail: 'Keep the app open until this finishes.' };
+      return { title: `Posting · ${percent(job.progress)}%`, detail: 'Keep the app open until this finishes.' };
     case 'processing':
       return job.slow
         ? { title: 'Still processing', detail: "It'll go live on your profile when it's ready." }
-        : { title: 'Almost live', detail: 'Getting your video ready for every phone…' };
+        : {
+            title: job.encoding ? `Processing · ${Math.round(job.encoding)}%` : 'Almost live',
+            detail: 'Getting your video ready for every phone. You can keep scrolling.',
+          };
     case 'published':
       return { title: 'Your Moment is live', detail: caption };
     case 'failed':

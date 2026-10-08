@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { PulseCard } from '@/components/pulse-card';
+import { FeedError } from '@/components/feed-error';
 import { ReelGrid } from '@/components/reel-grid';
 import { AppText } from '@/components/ui/app-text';
 import { Avatar } from '@/components/ui/avatar';
@@ -144,9 +145,11 @@ function ReelsSection({
     );
   }
   if (feed.reels.length === 0) {
-    return (
+    return feed.isError ? (
+      <FeedError error={feed.error} onRetry={() => feed.refetch()} />
+    ) : (
       <AppText color={Colors.textSecondary} style={styles.empty}>
-        {feed.isError ? "Couldn't load Moments." : empty}
+        {empty}
       </AppText>
     );
   }

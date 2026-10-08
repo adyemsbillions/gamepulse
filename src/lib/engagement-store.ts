@@ -88,7 +88,10 @@ export const engagement = {
   replay: (reel: Reel, current: boolean) =>
     optimistic('replayed', reel.id, !current, current, () => data.setReplay(reel.id, !current)),
   support: (userId: string, current: boolean) =>
-    optimistic('supporting', userId, !current, current, () => data.setSupport(userId, !current)),
+    optimistic('supporting', userId, !current, current, async () => {
+      await data.setSupport(userId, !current);
+      queryClient.invalidateQueries({ queryKey: keys.supportingFeed });
+    }),
 
   /** Drop a local Support tap, e.g. after a block ended the support on the server. */
   forgetSupport: (userId: string) => set('supporting', userId, undefined),

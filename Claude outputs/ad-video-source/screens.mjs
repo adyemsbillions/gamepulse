@@ -556,17 +556,26 @@ export function reelUI(ctx, sw, sh, reel, { cheered = 0, cheerCount, pop = 0, pr
 
   ctx.shadowColor = 'rgba(0,0,0,0.45)';
   ctx.shadowBlur = 8;
-  font(ctx, 'SB', 23);
-  ctx.textAlign = 'center';
-  ctx.fillStyle = 'rgba(244,254,255,0.7)';
-  ctx.fillText('Following', sw / 2 - 72, 112);
+  // The app's own feed switcher: Hot Now (active) and Supporting, with the sound button.
   font(ctx, 'B', 23);
+  ctx.textAlign = 'center';
   ctx.fillStyle = C.ice;
-  ctx.fillText('For You', sw / 2 + 70, 112);
+  ctx.fillText('Hot Now', sw / 2 - 74, 112);
+  font(ctx, 'SB', 23);
+  ctx.fillStyle = 'rgba(169,192,224,0.9)';
+  ctx.fillText('Supporting', sw / 2 + 74, 112);
   ctx.shadowBlur = 0;
-  ctx.fillStyle = C.volt;
-  rr(ctx, sw / 2 + 70 - 22, 124, 44, 5, 2.5); ctx.fill();
-  icon(ctx, 'search', sw - 48, 104, 30, C.ice, 2.2);
+  ctx.fillStyle = C.ice;
+  rr(ctx, sw / 2 - 74 - 40, 124, 80, 4, 2); ctx.fill();
+  // sound button: dark disc with a speaker and two waves
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  circle(ctx, sw - 52, 104, 26); ctx.fill();
+  ctx.fillStyle = C.ice;
+  ctx.beginPath();
+  ctx.moveTo(sw - 66, 98); ctx.lineTo(sw - 59, 98); ctx.lineTo(sw - 50, 90);
+  ctx.lineTo(sw - 50, 118); ctx.lineTo(sw - 59, 110); ctx.lineTo(sw - 66, 110); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = C.ice; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+  for (const r of [7, 13]) { ctx.beginPath(); ctx.arc(sw - 48, 104, r, -Math.PI / 4, Math.PI / 4); ctx.stroke(); }
 
   // right rail
   const rx = sw - 50;
@@ -844,7 +853,7 @@ export function cameraScreen(ctx, sw, sh, t) {
   // duration selector
   font(ctx, 'SB', 21);
   ctx.textAlign = 'center';
-  [['15s', -90], ['30s', 0], ['60s', 90]].forEach(([s, dx]) => {
+  [['30s', -90], ['1m', 0], ['3m', 90]].forEach(([s, dx]) => {
     ctx.fillStyle = dx === 0 ? C.ice : 'rgba(244,254,255,0.6)';
     ctx.fillText(s, sw / 2 + dx, sh - 262);
   });

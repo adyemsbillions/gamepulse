@@ -9,7 +9,7 @@ import { ChallengeCard } from '@/components/challenge-card';
 import { AppText } from '@/components/ui/app-text';
 import { Colors, Radius, Spacing, TabBarHeight } from '@/constants/theme';
 import { requireSignIn } from '@/lib/auth';
-import { MAX_MOMENT_SECONDS, MAX_UPLOAD_BYTES } from '@/lib/data/source';
+import { MAX_MOMENT_SECONDS, MAX_UPLOAD_BYTES, momentLengthLabel } from '@/lib/data/source';
 import { draftVideo, useDraftPreset, type PickedVideo } from '@/lib/uploads';
 
 type Source = 'camera' | 'library';
@@ -45,12 +45,12 @@ async function pickVideo(source: Source): Promise<PickedVideo | null> {
   if (durationSec && durationSec > MAX_MOMENT_SECONDS + 1) {
     Alert.alert(
       'Clip is too long',
-      `Moments can be up to ${MAX_MOMENT_SECONDS} seconds. This one is ${Math.round(durationSec)} s. Trim it in your gallery and try again.`,
+      `Moments can be up to ${momentLengthLabel()}. This one is ${Math.round(durationSec)} s. Trim it in your gallery and try again.`,
     );
     return null;
   }
   if (asset.fileSize && asset.fileSize > MAX_UPLOAD_BYTES) {
-    Alert.alert('Clip is too big', 'Pick a clip under 300 MB.');
+    Alert.alert('Clip is too big', `Pick a clip under ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB.`);
     return null;
   }
 
@@ -120,7 +120,7 @@ export default function CreateScreen() {
         <View style={styles.sources}>
           <SourceCard
             title="Record"
-            detail={`Film it now, up to ${MAX_MOMENT_SECONDS} seconds`}
+            detail={`Film it now, up to ${momentLengthLabel()}`}
             icon={<Camera size={26} color={Colors.pulse} strokeWidth={2.2} />}
             loading={busy === 'camera'}
             onPress={() => start('camera')}
@@ -137,7 +137,7 @@ export default function CreateScreen() {
 
         <View style={styles.rules}>
           <AppText variant="bodyBold">Before you post</AppText>
-          <Rule icon={<Clock size={18} color={Colors.primary} />} text={`Up to ${MAX_MOMENT_SECONDS} seconds.`} />
+          <Rule icon={<Clock size={18} color={Colors.primary} />} text={`Up to ${momentLengthLabel()}.`} />
           <Rule icon={<Smartphone size={18} color={Colors.primary} />} text="Hold your phone upright. Vertical clips fill the screen." />
           <Rule
             icon={<Copyright size={18} color={Colors.primary} />}

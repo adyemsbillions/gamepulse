@@ -1,10 +1,11 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { Send } from 'lucide-react-native';
-import { useState } from 'react';
+import { Send, Smile } from 'lucide-react-native';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -15,6 +16,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PulseBall } from '@/components/brand/pulse-ball';
+import { CommentMediaView } from '@/components/comment-media';
+import { StickerPicker } from '@/components/sticker-picker';
 import { AppText } from '@/components/ui/app-text';
 import { Avatar } from '@/components/ui/avatar';
 import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
@@ -24,7 +27,7 @@ import { UserFacingError } from '@/lib/data/source';
 import { formatCount, timeAgo } from '@/lib/format';
 import { useAddComment, useComments, useMe, useReel } from '@/lib/queries';
 import { useSessionUserId } from '@/lib/session';
-import type { Comment } from '@/lib/types';
+import type { Comment, CommentMedia } from '@/lib/types';
 
 export default function CommentsSheet() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -35,27 +38,41 @@ export default function CommentsSheet() {
   const { data: me } = useMe();
   const post = useAddComment(id);
   const [draft, setDraft] = useState('');
+  const [picking, setPicking] = useState(false);
+  const keyboardHeight = useAndroidKeyboardHeight();
 
   const comments = loaded.data ?? [];
   const total = Math.max(reel?.comments ?? 0, comments.length);
   const canPost = draft.trim().length > 0 && !post.isPending;
 
-  const submit = () => {
+  const send = (media: CommentMedia | null) => {
     const text = draft.trim();
-    if (!text || post.isPending) return;
-    post.mutate(text, {
-      onSuccess: () => setDraft(''),
-      onError: (e) =>
-        Alert.alert(
-          "Comment didn't post",
-          e instanceof UserFacingError ? e.message : 'Check your connection and try again.',
-        ),
-    });
+    if ((!text && !media) || post.isPending) return;
+    post.mutate(
+      { body: text, media },
+      {
+        onSuccess: () => {
+          setDraft('');
+          setPicking(false);
+        },
+        onError: (e) =>
+          Alert.alert(
+            "Comment didn't post",
+            e instanceof UserFacingError ? e.message : 'Check your connection and try again.',
+          ),
+      },
+    );
+  };
+  const submit = () => send(null);
+
+  const togglePicker = () => {
+    if (!picking) Keyboard.dismiss();
+    setPicking((p) => !p);
   };
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, Platform.OS === 'android' && { paddingBottom: keyboardHeight }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <AppText variant="heading" style={styles.title}>
         {formatCount(total)} {total === 1 ? 'comment' : 'comments'}
@@ -78,7 +95,7 @@ export default function CommentsSheet() {
           )
         }
       />
-      <View style={[styles.composer, { paddingBottom: insets.bottom + Spacing.two }]}>
+      <View style={[styles.composer, { paddingBottom: picking ? Spacing.two : insets.bottom + Spacing.two }]}>
         {uid === null ? (
           <Button label="Sign in to comment" onPress={() => router.push('/sign-in')} style={styles.signIn} />
         ) : (
@@ -87,6 +104,7 @@ export default function CommentsSheet() {
             <TextInput
               value={draft}
               onChangeText={setDraft}
+              onFocus={() => setPicking(false)}
               placeholder="Add a comment…"
               placeholderTextColor={Colors.textSecondary}
               style={styles.input}
@@ -95,6 +113,13 @@ export default function CommentsSheet() {
               maxLength={500}
               editable={!post.isPending}
             />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={picking ? 'Close stickers and GIFs' : 'Stickers and GIFs'}
+              onPress={togglePicker}
+              hitSlop={8}>
+              <Smile size={24} color={picking ? Colors.primary : Colors.textSecondary} />
+            </Pressable>
             <Pressable accessibilityLabel="Post comment" onPress={submit} disabled={!canPost} hitSlop={8}>
               {post.isPending ? (
                 <ActivityIndicator color={Colors.primary} />
@@ -105,8 +130,31 @@ export default function CommentsSheet() {
           </>
         )}
       </View>
+      {picking && uid !== null && (
+        <View style={{ paddingBottom: insets.bottom }}>
+          <StickerPicker onPick={(media) => send(media)} />
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
+}
+
+/**
+ * Android draws edge to edge, so the keyboard no longer pushes this sheet up: it slides over the
+ * comment box. Lift the content by the keyboard's height instead. (iOS uses KeyboardAvoidingView.)
+ */
+function useAndroidKeyboardHeight() {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const show = Keyboard.addListener('keyboardDidShow', (e) => setHeight(e.endCoordinates.height));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  return height;
 }
 
 function CommentRow({ comment }: { comment: Comment }) {
@@ -125,7 +173,8 @@ function CommentRow({ comment }: { comment: Comment }) {
         <AppText variant="label" color={Colors.textSecondary}>
           @{author.username} · {timeAgo(comment.createdAt)}
         </AppText>
-        <AppText variant="body">{comment.text}</AppText>
+        {!!comment.text && <AppText variant="body">{comment.text}</AppText>}
+        {comment.media && <CommentMediaView media={comment.media} />}
       </View>
       <View style={styles.cheer}>
         <PulseBall size={16} body="transparent" panel={Colors.textSecondary} />

@@ -1,6 +1,6 @@
 import { useIsFocused } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -8,8 +8,7 @@ import { LogoMark } from '@/components/brand/logo';
 import { ReelFeed } from '@/components/reels/reel-feed';
 import { AppText } from '@/components/ui/app-text';
 import { Colors, Fonts, Spacing } from '@/constants/theme';
-import { useSupportingOverrides } from '@/lib/engagement-store';
-import { useFeed, useMySupports } from '@/lib/queries';
+import { useFeed } from '@/lib/queries';
 
 type FeedTab = 'hot' | 'supporting';
 
@@ -17,19 +16,11 @@ export default function ReelsHome() {
   const insets = useSafeAreaInsets();
   const focused = useIsFocused();
   const [tab, setTab] = useState<FeedTab>('hot');
-  const serverSupports = useMySupports().data;
-  const overrides = useSupportingOverrides();
-  const supporting = useMemo(() => {
-    const set = new Set(serverSupports ?? []);
-    overrides.forEach((on, id) => (on ? set.add(id) : set.delete(id)));
-    return set;
-  }, [serverSupports, overrides]);
-
-  const feed = useFeed();
-  const reels = useMemo(
-    () => (tab === 'hot' ? feed.reels : feed.reels.filter((r) => supporting.has(r.userId))),
-    [tab, supporting, feed.reels],
-  );
+  const hot = useFeed();
+  // Its own feed (everyone you support, newest first), loaded the first time the tab is opened.
+  const supportingFeed = useFeed({ supporting: true }, { enabled: tab === 'supporting' });
+  const feed = tab === 'hot' ? hot : supportingFeed;
+  const reels = feed.reels;
 
   return (
     <View style={styles.container}>

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { FeedError } from '@/components/feed-error';
 import { ReelGrid } from '@/components/reel-grid';
 import { AppText } from '@/components/ui/app-text';
 import { Button } from '@/components/ui/button';
@@ -59,6 +60,8 @@ export default function HashtagScreen() {
               />
             )}
           </>
+        ) : feed.isError ? (
+          <FeedError error={feed.error} onRetry={() => feed.refetch()} />
         ) : (
           <AppText color={Colors.textSecondary} style={styles.empty}>
             No Moments with this hashtag yet.

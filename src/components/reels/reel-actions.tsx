@@ -12,6 +12,8 @@ import { Colors, Spacing } from '@/constants/theme';
 import { data } from '@/lib/api';
 import { requireSignIn } from '@/lib/auth';
 import { respondTo } from '@/lib/challenges';
+import { downloadMoment } from '@/lib/downloads';
+import { mediaToolsAvailable } from '@/lib/media-tools';
 import { adjustCount, engagement, useCheered, useReplayed, useSaved } from '@/lib/engagement-store';
 import { formatCount } from '@/lib/format';
 import { useDeleteReel, useNotInterested } from '@/lib/queries';
@@ -48,15 +50,19 @@ export function ReelActions({ reel, creator }: { reel: Reel; creator: User }) {
       },
     ]);
 
+  // Download with the GamePulse watermark: Android builds that include the media module.
+  const save = mediaToolsAvailable && reel.playbackUrl ? [{ label: 'Save video', onPress: () => void downloadMoment(reel) }] : [];
+
   const more = () =>
     isMine
       ? actionSheet.show({
           title: 'Your Moment',
-          options: [{ label: 'Delete Moment', destructive: true, onPress: confirmDelete }],
+          options: [...save, { label: 'Delete Moment', destructive: true, onPress: confirmDelete }],
         })
       : actionSheet.show({
           title: `@${creator.username}'s Moment`,
           options: [
+            ...save,
             { label: 'Respond with your Moment', onPress: () => respondTo(reel) },
             {
               label: 'Report',

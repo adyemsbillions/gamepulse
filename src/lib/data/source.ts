@@ -4,6 +4,7 @@ import type {
   CheckIn,
   ClubStanding,
   Comment,
+  CommentMedia,
   FanStanding,
   MyWeek,
   Hashtag,
@@ -30,11 +31,19 @@ export type FeedFilter = {
   challenge?: string;
   /** Moments responding to this reel, newest first. */
   respondsTo?: string;
+  /** Moments from everyone the signed-in user supports, newest first. */
+  supporting?: boolean;
 };
 
 /** True when a feed is ranked by the hot score (Hot Now, or a hashtag's Top). */
 export const isRankedFeed = (f: FeedFilter) =>
-  !f.saved && !f.username && !f.club && !f.challenge && !f.respondsTo && (!f.hashtag || f.sort === 'hot');
+  !f.saved &&
+  !f.supporting &&
+  !f.username &&
+  !f.club &&
+  !f.challenge &&
+  !f.respondsTo &&
+  (!f.hashtag || f.sort === 'hot');
 
 export type SearchResults = { users: User[]; hashtags: Hashtag[]; clubs: string[]; reels: Reel[] };
 
@@ -81,7 +90,11 @@ export interface DataSource {
   setMute(userId: string, on: boolean): Promise<void>;
   /** Not interested: this reel leaves your Hot Now and its creator ranks lower for you. */
   notInterested(reelId: string): Promise<void>;
-  addComment(reelId: string, body: string, parentId?: string | null): Promise<Comment>;
+  /** Text, a sticker/GIF, or both. */
+  addComment(reelId: string, body: string, parentId?: string | null, media?: CommentMedia | null): Promise<Comment>;
+  /** The signed-in user's saved stickers and GIFs, newest first. */
+  savedStickers(): Promise<CommentMedia[]>;
+  setSavedSticker(media: CommentMedia, on: boolean): Promise<void>;
   markNotificationsRead(): Promise<void>;
   report(input: { reelId: string; reason: ReportReason; details?: string }): Promise<void>;
   updateProfile(patch: ProfilePatch): Promise<User>;
@@ -118,8 +131,11 @@ export interface DataSource {
   // ---- uploads (GP-019/021/022)
   /** Create a reel for a new video and get where to upload it. */
   startUpload(input: UploadRequest): Promise<UploadTicket>;
-  /** Where a new reel's video is up to (asks the video host, so it works without the webhook). */
-  uploadStatus(reelId: string): Promise<ReelStatus>;
+  /**
+   * Where a new reel's video is up to (asks the video host, so it works without the webhook).
+   * `progress` is the host's encoding percentage while it's processing, when it reports one.
+   */
+  uploadStatus(reelId: string): Promise<{ status: ReelStatus; progress: number | null }>;
   /** Delete one of your own reels and its video. */
   deleteReel(reelId: string): Promise<void>;
 }
@@ -179,8 +195,13 @@ export function rankClubs(names: readonly string[], limit = 8): string[] {
     .map((e) => e.name);
 }
 
-export const MAX_MOMENT_SECONDS = 60;
-export const MAX_UPLOAD_BYTES = 300 * 1024 * 1024;
+/** Keep in step with LIMITS in supabase/functions/videos/handler.ts (the server enforces it). */
+export const MAX_MOMENT_SECONDS = 180;
+export const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+
+/** "3 minutes", "90 seconds"… for the limits shown in the app. */
+export const momentLengthLabel = (s = MAX_MOMENT_SECONDS) =>
+  s % 60 === 0 ? `${s / 60} minute${s === 60 ? '' : 's'}` : `${s} seconds`;
 export const MAX_HASHTAGS = 10;
 
 /** #tags in a caption, lowercased and de-duplicated, in the order they appear. */

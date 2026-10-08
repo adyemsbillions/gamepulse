@@ -15,9 +15,9 @@
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
 export const LIMITS = {
-  /** 60 s Moments, with a little slack for encoders that round up. */
-  maxDurationSec: 62,
-  maxFileBytes: 300 * 1024 * 1024,
+  /** 3-minute Moments, with a little slack for encoders that round up. Keep in step with the app. */
+  maxDurationSec: 182,
+  maxFileBytes: 500 * 1024 * 1024,
   uploadsPerDay: 20,
   maxTags: 10,
   captionLength: 2200,
@@ -57,17 +57,23 @@ type ReelRow = {
   video_provider: string | null;
   video_asset_id: string | null;
   duration_sec: number | string | null;
+  created_at?: string;
 };
 
 type BunnyVideo = {
   guid: string;
+  /** Get Video's VideoModelStatus (NOT the webhook's status codes; see statusFor). */
   status: number;
   length: number;
   thumbnailFileName?: string | null;
+  /** 0–100 while transcoding. */
+  encodeProgress?: number | null;
+  /** Resolutions already playable, e.g. "360p,720p". */
+  availableResolutions?: string | null;
 };
 
 const IN_FLIGHT: ReelStatus[] = ['uploading', 'processing', 'ready'];
-const REEL_COLUMNS = 'id, user_id, status, video_provider, video_asset_id, duration_sec';
+const REEL_COLUMNS = 'id, user_id, status, video_provider, video_asset_id, duration_sec, created_at';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -115,7 +121,8 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
       case 'create':
         return json(await createUpload(body, userId, deps, bunny));
       case 'refresh':
-        return json({ status: await refresh(String(body.reelId ?? ''), userId, deps, bunny) });
+        // { status, progress }: progress is Bunny's encoding % while it's processing.
+        return json(await refresh(String(body.reelId ?? ''), userId, deps, bunny));
       case 'delete':
         await remove(String(body.reelId ?? ''), userId, deps, bunny);
         return json({ deleted: true });
@@ -148,10 +155,10 @@ async function createUpload(body: Record<string, unknown>, userId: string, deps:
 
   const duration = Number(body.durationSec);
   const durationSec = Number.isFinite(duration) && duration > 0 ? Math.round(duration * 100) / 100 : null;
-  if (durationSec && durationSec > LIMITS.maxDurationSec) throw new HttpError(400, 'Moments can be up to 60 seconds.');
+  if (durationSec && durationSec > LIMITS.maxDurationSec) throw new HttpError(400, 'Moments can be up to 3 minutes.');
 
   const size = Number(body.fileSize);
-  if (Number.isFinite(size) && size > LIMITS.maxFileBytes) throw new HttpError(400, 'That video is too big (300 MB max).');
+  if (Number.isFinite(size) && size > LIMITS.maxFileBytes) throw new HttpError(400, 'That video is too big (500 MB max).');
 
   const fileType =
     typeof body.fileType === 'string' && /^video\/[\w.+-]{1,40}$/.test(body.fileType) ? body.fileType : 'video/mp4';
@@ -240,47 +247,69 @@ async function remove(reelId: string, userId: string, deps: Deps, bunny: BunnyCo
 
 // ---------------------------------------------------------------- status sync
 
-/** Reel status for a Bunny status code, or null to leave it as it is. */
-export function statusFor(bunnyStatus: number): ReelStatus | null {
-  switch (bunnyStatus) {
-    case 3: // finished
-    case 4: // first resolution finished: playable
+/**
+ * Reel status for what Bunny's Get Video API reports, or null to leave it as it is.
+ *
+ * Get Video uses VideoModelStatus, which is NOT the same numbering as the webhook's Status field
+ * (the webhook only tells us to look; sync() always reads Get Video). Mixing them up left uploads
+ * stuck on "processing" (6 = UploadFailed was ignored) and failed playable JIT videos (8).
+ *   0 Created · 1 Uploaded · 2 Processing · 3 Transcoding · 4 Finished · 5 Error
+ *   6 UploadFailed · 7 JitSegmenting · 8 JitPlaylistsCreated
+ */
+export function statusFor(video: Pick<BunnyVideo, 'status' | 'availableResolutions'>): ReelStatus | null {
+  const playable = !!video.availableResolutions?.trim();
+  switch (video.status) {
+    case 4: // finished
+    case 8: // JIT playlists ready: playable
       return 'published';
-    case 1: // processing
-    case 2: // encoding
-    case 7: // upload finished
+    case 3: // transcoding: live as soon as the first resolution is done
+    case 7: // JIT segmenting
+      return playable ? 'published' : 'processing';
+    case 1: // uploaded
+    case 2: // processing
       return 'processing';
-    case 5: // encoding failed
-    case 8: // upload failed
+    case 5: // error
+    case 6: // upload failed
       return 'failed';
-    default: // 0 created/queued, 6 upload started, 9/10 captions/titles
+    default: // 0 created: the file hasn't arrived yet
       return null;
   }
 }
 
-/** Bring one reel in line with what Bunny reports. Returns the reel's status afterwards. */
-async function sync(reel: ReelRow, deps: Deps, bunny: BunnyConfig): Promise<ReelStatus> {
-  if (!IN_FLIGHT.includes(reel.status) || reel.video_provider !== 'bunny' || !reel.video_asset_id) return reel.status;
+/** A video Bunny still hasn't received this long after the reel was created never will be. */
+const NEVER_ARRIVED_MS = 3 * 60 * 60 * 1000;
+
+type Synced = { status: ReelStatus; progress: number | null };
+
+/** Bring one reel in line with what Bunny reports: its status afterwards, and encoding progress. */
+async function sync(reel: ReelRow, deps: Deps, bunny: BunnyConfig): Promise<Synced> {
+  const done = (status: ReelStatus, progress: number | null = null): Synced => ({ status, progress });
+  if (!IN_FLIGHT.includes(reel.status) || reel.video_provider !== 'bunny' || !reel.video_asset_id) return done(reel.status);
   const guid = reel.video_asset_id;
 
   let video: BunnyVideo;
   try {
     video = (await bunnyApi(bunny, 'GET', `/videos/${guid}`)) as BunnyVideo;
   } catch (e) {
-    if (e instanceof BunnyError && e.status === 404) return update(deps.db, reel, { status: 'failed' });
+    if (e instanceof BunnyError && e.status === 404) return done(await update(deps.db, reel, { status: 'failed' }));
     throw e;
   }
-
-  let next = statusFor(video.status);
 
   // The app checks length before uploading; this is the check that can't be skipped.
   if (video.length > LIMITS.maxDurationSec) {
     await bunnyApi(bunny, 'DELETE', `/videos/${guid}`).catch((e) => console.error(e));
-    return update(deps.db, reel, { status: 'failed' });
+    return done(await update(deps.db, reel, { status: 'failed' }));
   }
 
-  if (!next || next === reel.status) return reel.status;
-  if (next === 'processing' && reel.status !== 'uploading') return reel.status;
+  let next = statusFor(video);
+  const now = deps.now?.() ?? Date.now();
+  if (!next && video.status === 0 && reel.created_at && now - Date.parse(reel.created_at) > NEVER_ARRIVED_MS) {
+    next = 'failed';
+  }
+  const progress = typeof video.encodeProgress === 'number' ? Math.max(0, Math.min(100, video.encodeProgress)) : null;
+
+  if (!next || next === reel.status) return done(reel.status, progress);
+  if (next === 'processing' && reel.status !== 'uploading') return done(reel.status, progress);
 
   const patch: Record<string, unknown> = { status: next };
   if (next === 'published') {
@@ -288,7 +317,7 @@ async function sync(reel: ReelRow, deps: Deps, bunny: BunnyConfig): Promise<Reel
     patch.thumbnail_url = `https://${bunny.cdnHost}/${guid}/${video.thumbnailFileName || 'thumbnail.jpg'}`;
     if (video.length > 0) patch.duration_sec = video.length;
   }
-  return update(deps.db, reel, patch);
+  return done(await update(deps.db, reel, patch), progress);
 }
 
 async function update(db: SupabaseClient, reel: ReelRow, patch: Record<string, unknown>): Promise<ReelStatus> {
@@ -330,7 +359,7 @@ async function webhook(req: Request, deps: Deps, bunny: BunnyConfig) {
   if (res.error) throw res.error;
   if (!res.data) return json({ ignored: 'unknown video' });
 
-  return json({ status: await sync(res.data as ReelRow, deps, bunny) });
+  return json({ status: (await sync(res.data as ReelRow, deps, bunny)).status });
 }
 
 // ---------------------------------------------------------------- helpers
